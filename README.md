@@ -1,40 +1,64 @@
-# FORGE StockTrader — Private Edition
+# FORGE StockTrader — Project Quantum 0.3.0
 
-## v0.2.0 — integrated Auction House tab
-StockTrader now appears as a bottom tab beside Auctionator. Vendor Sell and AH Koopjes are **inside** this tab. The standalone popup is gone. Press SCAN AUCTION HOUSE to start a full replicated scan; the prominent banner turns **amber while reading**, **green and says SCAN COMPLETE!** after success (with a chat message and deal counts), or **red** on an error/timeout. The current scan must finish before results are final.
+**Buy Low. Sell High. Protect Your Gold.** Built by [Novyx Forge](https://novyxforge.com) for WoW Forever, interface 16001. Private-use project; no CurseForge release. Repository visibility is unchanged.
 
+StockTrader stays inside the native Auction House using the bundled LibAHTab. Exactly two trading tabs: **Vendor Sell** and **AH Koopjes**. This is an implementation with automated tests, **not an in-game-certified release**.
 
-A standalone Auction House addon for **World of Warcraft: Forever**, built by **Novyx Forge**. This repository is presently public on GitHub; change it to private under **Settings → General → Danger Zone → Change visibility** if you want the source private.
+## Install / upgrade
 
-## Two tabs
+1. Back up `WTF/Account/<account>/SavedVariables/FORGEStockTraderDB.lua` while WoW is closed.
+2. Download this repository and copy its **FORGE_StockTrader** directory into `World of Warcraft/_forever_/Interface/AddOns/`, replacing the old addon folder. Keep all five Lua modules and the bundled Lib folder together.
+3. Restart WoW. Open an Auction House, then select **StockTrader**, or type `/fst`.
+4. Press **SCAN AH**. Leave the AH open and avoid other searches. Browse pages first, then every supported item key is searched individually. A large market can take a long time: requests are at least two seconds apart, with one outstanding request and shared throttle checks.
+5. Green **SCAN COMPLETE** means the declared scan scope was fully received, resolved and validated. Red means failure; previous history is preserved. Closing AH or another addon starting an AH query cancels the scan. **Cancel** is always available.
+6. Click a result for calculations, then **Verify exact live listing**. The same auction ID, full item string, quantity and current buyout must still qualify. Buy manually through Blizzard's AH. There is no purchase automation or invented executable commodity quote.
 
-- **Vendor Sell** — Displays current AH *buyout* auctions whose total buyout costs less than their entire stack's NPC-vendor resale value. This is a deterministic **positive gross margin** if that exact auction is still available and the item is vendor-sellable. "100% winst" means certainty of the arithmetic margin, **not** a 100% return on investment.
-- **AH Koopjes** — Displays **speculative** resale opportunities. A candidate requires at least **three previous distinct full scans**, three current listings of the identical item link, and a price 25% below the median of the prior observed asking-price snapshots. Projection deducts a **5% auction fee**, but does **not** include unsold/relisted deposits. Listed prices are not proven sales; selling for the estimate is never guaranteed.
+## What each tab means
 
-## How to install
+**Vendor Sell** contains positive integer-copper margins from identified individual auctions: vendor unit value × full quantity − full buyout − known acquisition costs. Default minimum profit is 1 silver. Tooltip includes quantity, ROI, profit per item, timestamp and verification state. Old entries are marked STALE; their arithmetic is historical, not a guarantee that the auction remains available.
 
-1. Copy the `FORGE_StockTrader` directory into `World of Warcraft\\_forever_\\Interface\\AddOns\\`.
-2. Fully restart WoW after installing a new addon.
-3. Open the Auction House and click the **StockTrader** tab next to Auctionator. `/fst` (or `/stocktrader`) selects that same AH tab while the AH is open.
-4. Click **SCAN AUCTION HOUSE**. The full replicated scan is account-throttled for approximately **15 minutes**. If another addon or character recently scanned, the server may not respond.
-5. Check the two tabs. Enter a minimum profit in **silver** and press **Enter** to apply.
-6. Clicking a deal attempts a new item search. **Always verify the item variant, complete stack, and current buyout yourself before purchasing.** The addon will never place bids or buy items.
+**AH Koopjes** requires changed historical snapshots spanning at least six hours, recent references, robust conservative prices, sufficient listing depth, an executable listing, explicit cost assumptions, acceptable downside and budget. No suitable items means **NO TRADE RECOMMENDED**. Open **Rejections / research** to see reasons and select an item to enter costs. This view is explicitly not a purchase recommendation.
 
-## Privacy and data
+In item details, supply the assumed **fee percent** and **deposit in gold for the complete stack**. Costs belong to that exact variant and stack quantity. No 5% fee is silently assumed. These are user assumptions, not live-verified Forever rules. Save costs and rescan (or live-reverify the selected research item). Commodity depth and experimental replicate data are research only: they cannot produce vendor deals or speculative buy recommendations without an executable listing.
 
-- No Auctioneer dependency, no networking, no uploading, and no automatic purchase.
-- SavedVariables stores local rolling ask-price samples by realm/faction and full item hyperlink identity; at most 12 observations per item, 30 days retained, and 3000 tracked item keys.
-- Fresh installs have **no historical speculations** until you complete several independent scans; this is intentional.
-- The current scan's findings are kept in memory until reload or the next successful scan.
+**Risk / filters** exposes profit, ROI, discount, exposure, downside and failed-posting settings. Defaults: 10% of current liquid gold per item variant, 25% total recorded speculative exposure, 30% ROI, 30% discount, at most 2% of current gold and 50% of purchase cost lost at vendor liquidation, two failed postings. These are cautious policy choices, not empirically optimal settings. Caps include manually recorded open positions; unrecorded purchases are unknown. Successful-sale deposits are refunded in the model; failed deposits are expenses. The current posting deposit also reserves cash.
+
+## Journal
+
+Inside **AH Koopjes**, click an item and use **I bought this: record** only after an actual purchase. Enter the actual complete-stack cost in copper. This is a manual record, not a detected purchase. The **Journal** section reports closed-trade results and open capital; it never derives win rates from disappearing auctions.
+
+To close a whole recorded position, enter the following in the Journal field, or use `/fst close`:
+
+`ID sold|vendored|abandoned grossCopper actualFeesCopper lostDepositsCopper failedAttempts`
+
+Example: `/fst close 1 sold 20000 1000 300 2` records 2g gross revenue, 10s actual fees and 3s forfeited deposits. Do not include refunded deposits. Partial exits are not supported: record separate purchases if you need separate outcomes. Abandoned revenue must be zero. Journal capacity is 2000 records; a full journal refuses further entries rather than deleting positions.
 
 ## Commands
 
-- `/fst` — select the embedded StockTrader tab (the Auction House must be open).
-- `/stocktrader` — same action.
+- `/fst`, `/stocktrader`: select the native AH tab.
+- `/fst journal`: list manual records in chat.
+- `/fst close ...`: record a completed position as above.
+- `/fst set <setting> <value>`: same numerical controls as Risk / filters; money is copper and percentages are fractions (0.3 = 30%). `/fst set alerts off` disables completion notifications.
+- `/fst probability 0.5`: optional **hypothetical** sale-probability scenario, never measured demand. Negative scenario EV rejects the trade. `/fst probability off` disables it. Tooltip shows scenario EV when enabled.
+- `/fst replicate`: opt-in experimental replicate scan, with a local 15-minute retry cooldown. Snapshot data without auction IDs stays research-only. Default scanning does **not** use this unverified path.
 
-## Status
+## Data / architecture
 
-**v0.2.0 — embedded AH tab test build.** Written against the documented Forever 1.60.1 / interface 16001 auction APIs. In-game testing still required for real server throttles, full-scan behaviour, UI rendering and item-data cache timing. Report errors using `/console scriptErrors 1`.
+Modules: `Model.lua` (pure arithmetic and risk), `Database.lua` (schema 3, history, journal), `Scanner.lua` (asynchronous state machine), `Core.lua` (WoW adapters, verification, staged analysis), `StockTrader.lua` (native UI). Existing bundled LibStub / LibAHTab and license are retained. Auctionator is optional, not required.
 
-## Bundled third-party library
-LibAHTab (MIT License, copyright plusmouse 2022) is bundled for safe AH tab integration, with its full copyright/license notice in `Lib/LibAHTab-LICENSE.txt` (upstream: https://github.com/TheMouseNest/LibAHTab). LibStub is public domain; credits are preserved in its file.
+Old `realms` data is preserved intact. New observations are separated by region, client interface, ruleset realm name and player faction. Old samples lacking provenance are not reused as statistical evidence. New history: 30-day retention, maximum 24 changed snapshots per variant and 3000 variants per market; price estimates use seven days with latest reference no older than 24 hours. Duplicate fingerprints do not add evidence. Raw scan rows are session-only. Current browsing is not a simultaneous market snapshot; each row has its own timestamp.
+
+No network traffic, telemetry, bids or buying APIs. [Mathematics and limitations](docs/MODEL.md), [API evidence and live test checklist](docs/VALIDATION.md), [changelog](CHANGELOG.md).
+
+## Automated checks
+
+Run from the repository root:
+
+```sh
+python3 -m pip install lupa
+python3 tests/run.py
+```
+
+The runner explicitly uses **Lua 5.1**. Tests include pure calculations, scanner timing and failure cases, a mocked native UI with the actual bundled LibAHTab, and full Core scan / live-verification paths. Mock success does not establish live client compatibility. See `docs/VALIDATION.md` for results and outstanding checks.
+
+LibAHTab is MIT licensed, copyright plusmouse 2022; see `Lib/LibAHTab-LICENSE.txt`. LibStub is public domain, with original credits retained.

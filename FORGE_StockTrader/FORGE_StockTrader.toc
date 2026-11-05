@@ -2,9 +2,14 @@
 ## Title: FORGE StockTrader
 ## Notes: Vendor arbitrage and speculative Auction House bargains for WoW Forever
 ## Author: Novyx Forge
-## Version: 0.2.0
+## Version: 0.3.0
+## OptionalDeps: Auctionator
 ## SavedVariables: FORGEStockTraderDB
 
 Lib/LibStub.lua
 Lib/LibAHTab.lua
+Model.lua
+Database.lua
+Scanner.lua
+Core.lua
 StockTrader.lua

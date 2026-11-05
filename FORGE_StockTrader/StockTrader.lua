@@ -1,506 +1,168 @@
-local ADDON, ST = ...
-local COOLDOWN, CHUNK, MAX_DEALS = 900, 250, 160
-local scan, ahOpen, tab = nil, false, 1
-local scanState, attached, tabLibrary = "idle", false, nil
-local vendorDeals, marketDeals = {}, {}
-local status = "Open an Auction House and press SCAN."
-local ui, list, scroll, rows = nil, nil, nil, {}
-local db
-
--- All amounts are copper. Buyouts are for complete stacks.
-local function money(value)
-    value = math.max(0, math.floor(value or 0))
-    local g, s, c = math.floor(value / 10000), math.floor(value % 10000 / 100), value % 100
-    if g > 0 then return string.format("%dg %02ds %02dc", g, s, c) end
-    if s > 0 then return string.format("%ds %02dc", s, c) end
-    return c .. "c"
+-- Native AH shell retained from 0.2.0; calculations/scanning live in testable modules.
+local _,ST=...; local M,D=ST.Model,ST.Database
+local ui,lib,attached; local rows={}; local page=1; local panel=nil; local sort='profit'; local ascending=false
+local function label(parent,x,y,w,text,font)
+    local t=parent:CreateFontString(nil,'OVERLAY',font or 'GameFontHighlightSmall')
+    t:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); t:SetSize(w,20); t:SetJustifyH('LEFT'); t:SetText(text or ''); return t
 end
-local function median(data)
-    if #data == 0 then return nil end
-    local copy = {}
-    for i = 1, #data do copy[i] = data[i] end
-    table.sort(copy)
-    local middle = math.floor((#copy + 1) / 2)
-    if #copy % 2 == 1 then return copy[middle] end
-    return math.floor((copy[middle] + copy[middle + 1]) / 2)
+local function button(parent,x,y,w,text,fn)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); b:SetPoint('TOPLEFT',x,y); b:SetSize(w,24); b:SetText(text); b:SetScript('OnClick',fn); return b
 end
-local function store()
-    FORGEStockTraderDB = FORGEStockTraderDB or { realms = {} }
-    FORGEStockTraderDB.realms = FORGEStockTraderDB.realms or {}
-    local realm = (GetRealmName() or "Unknown") .. ":" .. (UnitFactionGroup("player") or "Unknown")
-    local entry = FORGEStockTraderDB.realms[realm]
-    if not entry then
-        entry = { history = {}, minVendor = 0, minMarket = 10000 }
-        FORGEStockTraderDB.realms[realm] = entry
+local function input(parent,x,y,w)
+    local e=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); e:SetPoint('TOPLEFT',x,y); e:SetSize(w,22); e:SetAutoFocus(false); e:SetMaxLetters(16)
+    e:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return e
+end
+local function tip(r)
+    GameTooltip:SetOwner(ui,'ANCHOR_RIGHT')
+    if r.link then GameTooltip:SetHyperlink(r.link) else GameTooltip:SetText(r.name) end
+    GameTooltip:AddLine(r.reason or 'Positive vendor margin; exact auction must still exist',1,.8,.3,true)
+    GameTooltip:AddLine('ROI: '..string.format('%.1f%%',(r.roi or 0)*100)..' | Per item: '..ST.money((r.profit or 0)/r.count),.7,1,.7,true)
+    GameTooltip:AddLine('Observed '..date('%H:%M:%S',r.observed or time())..' | '..(r.verification or 'Not reverified'),1,.8,.3,true)
+    if r.prices then
+        GameTooltip:AddLine(r.prices.method,1,1,1,true)
+        GameTooltip:AddLine('Base/unit '..ST.money(r.prices.base)..' | Upside/unit '..ST.money(r.prices.optimistic),1,1,1,true)
+        GameTooltip:AddLine(r.prices.sample..' changed snapshots; latest '..date('%d-%m %H:%M',r.prices.last),1,1,1,true)
+        GameTooltip:AddLine('Supply depth: '..r.depth..'. Demand and sale probability unknown.',1,.8,.3,true)
+        for _,s in ipairs(r.scenarios) do GameTooltip:AddLine(string.format('Price -%d%%: %s',s.drop*100,ST.money(s.profit)),1,1,1,true) end
+        if r.ev then GameTooltip:AddLine('USER probability scenario '..string.format('%.0f%%',r.probability*100)..': EV '..ST.money(r.ev)..' (not measured)',1,.8,.3,true) end
+        GameTooltip:AddLine('1 failure + 15% decline: '..ST.money(r.oneFailure),1,.8,.3,true)
     end
-    entry.history = entry.history or {}
-    entry.minVendor = entry.minVendor or 0
-    entry.minMarket = entry.minMarket or 10000
-    return entry
+    GameTooltip:Show()
 end
-local function rank(deals)
-    table.sort(deals, function(a, b)
-        if a.profit == b.profit then return a.buyout < b.buyout end
-        return a.profit > b.profit
-    end)
-    while #deals > MAX_DEALS do table.remove(deals) end
+function ST.VisibleRows()
+    local all=ST.tab==1 and ST.vendor or (ST.showRejected and ST.rejected or ST.market)
+    local result={}; for _,r in ipairs(all) do result[#result+1]=r end
+    table.sort(result,function(a,b)
+        local av,bv=a[sort] or (sort=='name' and '' or 0),b[sort] or (sort=='name' and '' or 0)
+        if av==bv then return (a.auctionID or 0)<(b.auctionID or 0) end
+        if ascending then return av<bv else return av>bv end
+    end); return result
 end
-local function itemKey(link)
-    -- Keeping the full item-string avoids merging gear with different modifiers.
-    return type(link) == "string" and link:match("|H(item:[^|]+)|h") or nil
-end
-local function vendorValue(link, id)
-    if not C_Item or not C_Item.GetItemInfo then return nil end
-    local _, _, _, _, _, _, _, _, _, _, value = C_Item.GetItemInfo(link or id)
-    if type(value) ~= "number" then
-        _, _, _, _, _, _, _, _, _, _, value = C_Item.GetItemInfo(id)
-    end
-    return type(value) == "number" and value > 0 and value or nil
-end
-local function offer(group, row)
-    local entries = group.cheapest
-    local position = #entries + 1
-    while position > 1 and entries[position - 1].unit > row.unit do
-        position = position - 1
-    end
-    if position <= 5 then
-        table.insert(entries, position, row)
-        if #entries > 5 then table.remove(entries) end
-    end
-end
-local function pushVendor(row, value, collection)
-    if not value then return false end
-    local profit = value * row.count - row.buyout
-    if profit > 0 then
-        row.profit, row.value = profit, value * row.count
-        collection[#collection + 1] = row
-        return true
-    end
-    return false
-end
-local function loadRow(index)
-    local name, _, count, _, _, _, _, _, _, buyout,
-        _, _, _, _, _, _, id = C_AuctionHouse.GetReplicateItemInfo(index)
-    if type(id) ~= "number" or type(count) ~= "number" or count < 1
-       or type(buyout) ~= "number" or buyout <= 0 then return end
-    local link = C_AuctionHouse.GetReplicateItemLink(index)
-    local row = { name = name and name ~= "" and name or ("Item #" .. id),
-                  id = id, link = link, count = count, buyout = buyout,
-                  unit = buyout / count }
-    local value = vendorValue(link, id)
-    if value then
-        pushVendor(row, value, scan.vendor)
+function ST.Refresh()
+    if not ui or not ST.db then return end
+    local s=ST.scan; local busy=s and (s.active or ST.analysis or (ST.verify and ST.verify.active))
+    local state=s and s.state or 'IDLE'; local caption=state
+    local r,g,b=.28,.29,.31
+    if state=='COMPLETE' then r,g,b=.06,.38,.15; caption='SCAN COMPLETE'
+    elseif state=='ERROR' or state=='TIMEOUT' then r,g,b=.5,.08,.1; caption='SCAN FAILED: '..state
+    elseif busy then r,g,b=.5,.32,.05; caption='SCANNING: '..state end
+    ui.banner.bg:SetColorTexture(r,g,b,.96); ui.banner.caption:SetText(caption)
+    ui.status:SetText((s and s.message or ST.message)..(busy and string.format(' | %ds | %d listings | keys %d/%d',GetTime()-s.started,s.processed or 0,math.min(s.keyIndex or 0,#(s.keys or {})),#(s.keys or {})) or ''))
+    ui.note:SetText(ST.message)
+    ui.last:SetText('Last success: '..(ST.db.lastScan and date('%d-%m %H:%M',ST.db.lastScan) or 'Never')..' | Browse: when AH idle; requests >=2s apart')
+    ui.scan:SetEnabled(not busy and ST.open); ui.cancel:SetEnabled(not not busy)
+    ui.tabs[1]:SetText(ST.tab==1 and '> Vendor Sell' or 'Vendor Sell'); ui.tabs[2]:SetText(ST.tab==2 and '> AH Koopjes' or 'AH Koopjes')
+    ui.reject:SetShown(ST.tab==2); ui.journal:SetShown(ST.tab==2)
+    ui.reject:SetText(ST.showRejected and 'Show candidates' or 'Rejections / research')
+    ui.table:Hide(); ui.detail:Hide(); ui.settings:Hide(); ui.history:Hide()
+    if panel=='detail' and ST.selected then
+        ui.detail:Show(); local d=ST.selected
+        ui.detail.title:SetText(d.name..' x'..d.count..' | '..(d.verification or 'NOT REVERIFIED'))
+        ui.detail.body:SetText('Buyout '..ST.money(d.buyout)..'   Value '..ST.money(d.value)..'   Profit '..ST.money(d.profit)..'\n'..
+            'ROI '..string.format('%.1f%%',(d.roi or 0)*100)..'   Per item '..ST.money((d.profit or 0)/d.count)..'   Age '..math.max(0,time()-(d.observed or 0))..'s\n'..
+            (d.prices and ('Conservative unit '..ST.money(d.prices.conservative)..' | '..d.prices.confidence..' confidence | Score '..d.score..'/100\n'..
+            'Vendor downside '..ST.money(-d.downside)..' | Break-even stack '..ST.money(d.breakEven)..'\n'..
+            'MAX SAFE BUY PRICE '..ST.money(d.safe)..' (model threshold, no guarantee)\n') or '')..
+            (d.reason or 'Deterministic margin only if this exact listing remains available.'))
+        local fee=ST.db.fees[d.key]
+        if not ui.detail.cut:HasFocus() then ui.detail.cut:SetText(fee and tostring(fee.cutBP/100) or '') end
+        if not ui.detail.deposit:HasFocus() then ui.detail.deposit:SetText(fee and tostring(fee.deposit/10000) or '') end
+        ui.detail.verify:SetEnabled(not busy); ui.detail.record:SetEnabled(not busy)
+    elseif panel=='settings' then
+        ui.settings:Show()
+        for k,e in pairs(ui.settings.inputs) do if not e:HasFocus() then e:SetText(tostring(ST.db.settings[k])) end end
+    elseif panel=='journal' then
+        ui.history:Show(); local p=D.performance(ST.db)
+        ui.history.summary:SetText('Realized net '..ST.money(p.net)..' | Open capital '..ST.money(p.capital)..' | Closed '..p.n..'\n'..
+            'Win rate '..(p.winRate and string.format('%.1f%%',p.winRate*100) or 'N/A')..' | Largest loss '..ST.money(p.largestLoss)..' | Median ROI '..(p.medianReturn and string.format('%.1f%%',p.medianReturn*100) or 'N/A'))
+        local lines={}; local j=ST.db.journal; for i=math.max(1,#j-3),#j do local t=j[i]; lines[#lines+1]='#'..t.id..' '..t.name..' | '..t.outcome..' | '..ST.money(t.profit or -t.purchase) end
+        ui.history.entries:SetText(table.concat(lines,'\n'))
     else
-        scan.pending[#scan.pending + 1] = row
-        if not scan.requests[id] and C_Item and C_Item.RequestLoadItemDataByID then
-            scan.requests[id] = true
-            pcall(C_Item.RequestLoadItemDataByID, id)
+        panel=nil; ui.table:Show(); local data=ST.VisibleRows(); local pages=math.max(1,math.ceil(#data/5)); page=math.min(page,pages)
+        ui.table.count:SetText(string.format('%d %s | page %d/%d',#data,ST.showRejected and ST.tab==2 and 'rejected / research only' or 'snapshot candidates - reverify',page,pages))
+        ui.table.empty:SetText(#data==0 and (ST.tab==1 and 'NO VERIFIED VENDOR DEALS\nOnly exact individual listings with positive margins qualify.\nOlder than 120s? Rescan; never buy from a stale snapshot.' or 'NO TRADE RECOMMENDED\nBuild history over multiple periods. Set costs in item details.\nOpen Rejections / research for reasons; asking prices do not prove demand.') or '')
+        for i=1,5 do
+            local row=rows[i]; local d=data[(page-1)*5+i]; row.deal=d
+            if d then
+                row:Show(); row.labels[1]:SetText(d.name); row.labels[2]:SetText(d.count); row.labels[3]:SetText(ST.money(d.buyout))
+                row.labels[4]:SetText(ST.money(d.value)); row.labels[5]:SetText(ST.money(d.profit)); row.labels[6]:SetText(d.roi and string.format('%.0f%%',d.roi*100) or '?')
+                row.labels[7]:SetText(time()-(d.observed or 0)>120 and 'STALE' or (d.score or (d.executable and 'Check' or 'Research')))
+            else row:Hide() end
         end
-    end
-    local key = itemKey(link)
-    if not key then return end
-    local group = scan.groups[key]
-    if not group then
-        group = { count = 0, cheapest = {} }
-        scan.groups[key] = group
-    end
-    group.count = group.count + 1
-    offer(group, row)
-end
-
-local function makeMarketDeals(history)
-    local deals = {}
-    for key, group in pairs(scan.groups) do
-        local prior = history[key]
-        local cheapest = group.cheapest[1]
-        if prior and #prior >= 3 and cheapest and group.count >= 2 then
-            local observations = {}
-            for i = 1, #prior do
-                if type(prior[i].price) == "number" and prior[i].price > 0 then
-                    observations[#observations + 1] = prior[i].price
-                end
-            end
-            if #observations >= 3 then
-                local estimate = median(observations)
-                -- Require 25% discount versus median of previous asking prices.
-                if estimate and cheapest.unit <= estimate * .75 then
-                    local value = math.floor(estimate * cheapest.count)
-                    local profit = math.floor(value * .95) - cheapest.buyout
-                    if profit > 0 then
-                        deals[#deals + 1] = {
-                            id = cheapest.id, name = cheapest.name, link = cheapest.link,
-                            count = cheapest.count, buyout = cheapest.buyout,
-                            value = value, profit = profit, sample = #observations
-                        }
-                    end
-                end
-            end
-        end
-    end
-    rank(deals)
-    return deals
-end
-
-local function saveHistory(history)
-    local now, cutoff = time(), time() - 30 * 86400
-    for key, observations in pairs(history) do
-        local keep = {}
-        for i = 1, #observations do
-            if observations[i].at and observations[i].at >= cutoff then
-                keep[#keep + 1] = observations[i]
-            end
-        end
-        if #keep == 0 then history[key] = nil else history[key] = keep end
-    end
-    for key, group in pairs(scan.groups) do
-        if group.count >= 3 and #group.cheapest >= 3 then
-            local values = {}
-            for i = 1, #group.cheapest do values[i] = group.cheapest[i].unit end
-            local estimate = median(values)
-            if estimate then
-                local observations = history[key] or {}
-                if #observations == 0 or now - observations[#observations].at >= COOLDOWN - 10 then
-                    observations[#observations + 1] = { at = now, price = estimate }
-                    while #observations > 12 do table.remove(observations, 1) end
-                    history[key] = observations
-                end
-            end
-        end
-    end
-    -- Bound SavedVariables so a long-running private addon does not grow forever.
-    local index = {}
-    for key, observations in pairs(history) do
-        index[#index + 1] = { key = key, at = observations[#observations].at }
-    end
-    if #index > 3000 then
-        table.sort(index, function(a, b) return a.at > b.at end)
-        for i = 3001, #index do history[index[i].key] = nil end
     end
 end
-
-local function refresh()
-    if not ui then return end
-    local data = store()
-    ui.tabs[1]:SetText(tab == 1 and "> VENDOR SELL" or "VENDOR SELL")
-    ui.tabs[2]:SetText(tab == 2 and "> AH KOOPJES" or "AH KOOPJES")
-    ui.scanButton:SetEnabled(not scan)
-    if ui.banner then
-        local title, r, g, b = "READY TO SCAN", .12, .26, .43
-        if scanState == "running" then title, r, g, b = "SCANNING AUCTIONS...", .58, .36, .06
-        elseif scanState == "done" then title, r, g, b = "SCAN COMPLETE!", .06, .44, .16
-        elseif scanState == "error" then title, r, g, b = "SCAN NOT COMPLETED", .52, .09, .10 end
-        ui.banner.bg:SetColorTexture(r, g, b, .96)
-        ui.banner.caption:SetText(title)
-    end
-    ui.scanButton:SetText(scan and "SCANNING..." or "SCAN AUCTION HOUSE")
-    local last = data.lastScan and date("%d-%m %H:%M", data.lastScan) or "Never"
-    ui.status:SetText(status)
-    ui.last:SetText("Last completed scan: " .. last)
-    local all = tab == 1 and vendorDeals or marketDeals
-    local threshold = tab == 1 and data.minVendor or data.minMarket
-    if not ui.input:HasFocus() then ui.input:SetText(tostring(math.floor(threshold / 100))) end
-    local filtered = {}
-    for _, result in ipairs(all) do
-        if result.profit >= threshold then
-            filtered[#filtered + 1] = result
-            if #filtered >= 70 then break end
-        end
-    end
-    ui.count:SetText(string.format("%d visible / %d found  |  %s",
-        #filtered, #all, tab == 1 and "Positive vendor margin" or "Speculative resale"))
-    for i = 1, math.max(#rows, #filtered) do
-        local r = rows[i]
-        if not r then
-            r = CreateFrame("Button", nil, scroll)
-            r:SetSize(627, 28)
-            r:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(i - 1) * 29)
-            r.bg = r:CreateTexture(nil, "BACKGROUND")
-            r.bg:SetAllPoints()
-            r.bg:SetColorTexture(.16, .17, .19, i % 2 == 0 and .6 or .3)
-            r.labels = {}
-            local widths = {185, 38, 91, 92, 93, 85}
-            local positions = {6, 200, 242, 336, 433, 532}
-            for col = 1, 6 do
-                local t = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                t:SetPoint("LEFT", r, "LEFT", positions[col], 0)
-                t:SetSize(widths[col], 22)
-                t:SetJustifyH(col == 1 and "LEFT" or "RIGHT")
-                t:SetMaxLines(1)
-                r.labels[col] = t
-            end
-            r:SetScript("OnClick", function(self)
-                local d = self.deal
-                if not d or not ahOpen then
-                    status = "Open the Auction House to recheck this deal."; refresh(); return
-                end
-                -- The replicated snapshot cannot be purchased directly.
-                -- Always manually VERIFY current stack, variant, and buyout.
-                local key = C_AuctionHouse.MakeItemKey and C_AuctionHouse.MakeItemKey(d.id)
-                    or {itemID = d.id, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0}
-                local ok = pcall(C_AuctionHouse.SendSearchQuery, key, {}, false)
-                status = ok and "Search sent. VERIFY item variant, stack and live buyout before buying."
-                    or "Could not open search; look up the item in the AH manually."
-                refresh()
-            end)
-            r:SetScript("OnEnter", function(self)
-                if self.deal and self.deal.link then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetHyperlink(self.deal.link)
-                    GameTooltip:Show()
-                end
-            end)
-            r:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            rows[i] = r
-        end
-        local d = filtered[i]
-        if d then
-            r.deal = d
-            r.labels[1]:SetText(d.name)
-            r.labels[2]:SetText(d.count)
-            r.labels[3]:SetText(money(d.buyout))
-            r.labels[4]:SetText(money(d.value))
-            r.labels[5]:SetText("|cff66ee88+" .. money(d.profit) .. "|r")
-            r.labels[6]:SetText(tab == 1 and "VENDOR" or (d.sample .. " scans"))
-            r:Show()
-        else
-            r.deal = nil
-            r:Hide()
-        end
-    end
-    scroll:SetHeight(math.max(152, #filtered * 29))
-end
-
-local function startScan()
-    if scan then return end
-    if not ahOpen then status = "Open an Auction House first."; scanState = "error"; refresh(); return end
-    if not C_AuctionHouse or not C_AuctionHouse.ReplicateItems then
-        status = "Full AH scan API is unavailable on this client."; scanState = "error"; refresh(); return
-    end
-    local data = store()
-    local remaining = COOLDOWN - (time() - (data.lastScan or 0))
-    if remaining > 0 then
-        scanState = "idle"
-        status = string.format("Full scan cooldown: %dm %02ds.",
-            math.floor(remaining / 60), remaining % 60)
-        refresh()
-        return
-    end
-    scan = { phase = "waiting", started = GetTime(), nextIndex = 0,
-             groups = {}, vendor = {}, pending = {}, requests = {}, total = 0 }
-    scanState = "running"
-    status = "Requesting complete AH snapshot..."
-    refresh()
-    local ok, err = pcall(C_AuctionHouse.ReplicateItems)
-    if not ok then
-        scan = nil
-        scanState = "error"
-        status = "Scan failed: " .. tostring(err)
-        refresh()
-    end
-end
-
-local function finishScan()
-    local missing = 0
-    for i = 1, #scan.pending do
-        local row = scan.pending[i]
-        local vendor = vendorValue(row.link, row.id)
-        if not vendor then missing = missing + 1
-        else pushVendor(row, vendor, scan.vendor) end
-    end
-    local data = store()
-    marketDeals = makeMarketDeals(data.history)  -- Only prior scans count.
-    vendorDeals = scan.vendor
-    rank(vendorDeals)
-    saveHistory(data.history)
-    data.lastScan = time()
-    local count = scan.total
-    scan = nil
-    scanState = "done"
-    status = string.format("Scanned %d auctions. Vendor: %d | AH bargains: %d | No vendor data: %d",
-        count, #vendorDeals, #marketDeals, missing)
-    print("|cff55ff77FORGE StockTrader: SCAN COMPLETE!|r " .. count .. " auctions | " .. #vendorDeals .. " vendor deals | " .. #marketDeals .. " AH bargains.")
-    refresh()
-end
-
-
 local function build()
-    -- Dock into Blizzard's AuctionHouseFrame instead of opening a second window.
-    ui = CreateFrame("Frame", "FORGEStockTraderFrame", AuctionHouseFrame, "BackdropTemplate")
-    ui:SetSize(676, 421)
-    ui:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 30, -39)
-    ui:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 15)
-    ui:EnableMouse(true)
-    ui:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12, insets = {left = 3, right = 3, top = 3, bottom = 3}})
-    ui:SetBackdropColor(.05, .065, .08, .98)
-    ui:SetBackdropBorderColor(.55, .43, .23, 1)
-
-    local function text(x, y, w, label, font)
-        local t = ui:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
-        t:SetPoint("TOPLEFT", ui, "TOPLEFT", x, y)
-        t:SetSize(w, 22)
-        t:SetJustifyH("LEFT")
-        t:SetText(label)
-        return t
+    ui=CreateFrame('Frame','FORGEStockTraderFrame',AuctionHouseFrame,'BackdropTemplate'); ST.ui=ui
+    ui:SetSize(676,421); ui:SetPoint('TOPLEFT',AuctionHouseFrame,'TOPLEFT',30,-39); ui:SetFrameLevel(AuctionHouseFrame:GetFrameLevel()+15); ui:EnableMouse(true)
+    ui:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Tooltips\\UI-Tooltip-Border',edgeSize=12,insets={left=3,right=3,top=3,bottom=3}})
+    ui:SetBackdropColor(.045,.055,.07,.99); ui:SetBackdropBorderColor(.55,.43,.23,1)
+    label(ui,16,-8,630,'FORGE StockTrader  |  QUANTUM 0.3.0','GameFontNormalLarge'):SetTextColor(1,.78,.33)
+    label(ui,18,-31,630,'NOVYXFORGE.COM  /  BUY LOW. SELL HIGH. PROTECT YOUR GOLD.')
+    ui.tabs={button(ui,16,-57,130,'Vendor Sell',function()ST.tab=1; ST.showRejected=false; panel=nil; page=1; ST.Refresh()end),button(ui,150,-57,130,'AH Koopjes',function()ST.tab=2; panel=nil; page=1; ST.Refresh()end)}
+    button(ui,290,-57,90,'Risk / filters',function()panel=panel=='settings' and nil or 'settings'; ST.Refresh()end)
+    ui.cancel=button(ui,390,-57,75,'Cancel',ST.Cancel); ui.scan=button(ui,472,-57,186,'SCAN AH',function()panel=nil; ST.Start('browse')end)
+    ui.banner=CreateFrame('Frame',nil,ui); ui.banner:SetPoint('TOPLEFT',16,-89); ui.banner:SetSize(642,26)
+    ui.banner.bg=ui.banner:CreateTexture(nil,'BACKGROUND'); ui.banner.bg:SetAllPoints(); ui.banner.caption=label(ui.banner,8,-3,625,'','GameFontNormal')
+    ui.status=label(ui,18,-119,638,''); ui.status:SetHeight(32)
+    ui.last=label(ui,18,-153,640,''); ui.note=label(ui,18,-385,638,''); ui.note:SetHeight(30)
+    ui.reject=button(ui,16,-177,170,'Rejections / research',function()ST.showRejected=not ST.showRejected; page=1; panel=nil; ST.Refresh()end)
+    ui.journal=button(ui,194,-177,100,'Journal',function()panel=panel=='journal' and nil or 'journal'; ST.Refresh()end)
+    ui.table=CreateFrame('Frame',nil,ui); ui.table:SetAllPoints()
+    ui.table.count=label(ui.table,310,-178,345,'')
+    local pos={18,213,254,349,444,546,600}; local widths={190,36,90,90,98,49,55}
+    local headings={'Item','Qty','Buyout','Value','Profit','ROI','Score'}; local fields={'name','count','buyout','value','profit','roi','score'}
+    for i=1,7 do local index=i; button(ui.table,pos[i],-207,widths[i],headings[i],function() if sort==fields[index] then ascending=not ascending else sort=fields[index]; ascending=false end; ST.Refresh()end) end
+    for i=1,5 do
+        local r=CreateFrame('Button',nil,ui.table); r:SetPoint('TOPLEFT',16,-235-(i-1)*25); r:SetSize(642,24)
+        r.bg=r:CreateTexture(nil,'BACKGROUND'); r.bg:SetAllPoints(); r.bg:SetColorTexture(.18,.18,.2,i%2==0 and .7 or .35)
+        r.labels={}; for col=1,7 do r.labels[col]=label(r,pos[col]-16,-2,widths[col]-4,'') end
+        r:SetScript('OnEnter',function(self)if self.deal then tip(self.deal)end end); r:SetScript('OnLeave',function()GameTooltip:Hide()end)
+        r:SetScript('OnClick',function(self)ST.selected=self.deal; panel='detail'; ui.detail.paid:SetText(tostring(self.deal.buyout)); ST.Refresh()end); rows[i]=r
     end
-    local title = text(16, -9, 410, "FORGE StockTrader", "GameFontNormalLarge")
-    title:SetTextColor(1, .78, .33)
-    text(18, -34, 620, "NOVYX FORGE  /  PRIVATE EDITION  /  WOW FOREVER")
-
-    local function button(label, x, w, fn)
-        local b = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
-        b:SetPoint("TOPLEFT", x, -65)
-        b:SetSize(w, 27)
-        b:SetText(label)
-        b:SetScript("OnClick", fn)
-        return b
-    end
-    ui.tabs = {
-        button("VENDOR SELL", 16, 135, function() tab = 1; refresh() end),
-        button("AH KOOPJES", 155, 135, function() tab = 2; refresh() end)
-    }
-    ui.scanButton = button("SCAN AUCTION HOUSE", 463, 197, startScan)
-
-    ui.banner = CreateFrame("Frame", nil, ui)
-    ui.banner:SetPoint("TOPLEFT", 16, -102)
-    ui.banner:SetSize(643, 29)
-    ui.banner.bg = ui.banner:CreateTexture(nil, "BACKGROUND")
-    ui.banner.bg:SetAllPoints()
-    ui.banner.caption = ui.banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.banner.caption:SetPoint("CENTER")
-
-    ui.status = text(18, -135, 635, "")
-    ui.status:SetHeight(24)
-    ui.last = text(18, -159, 405, "")
-    ui.count = text(18, -183, 410, "")
-    text(424, -183, 145, "Min. profit (silver):")
-
-    ui.input = CreateFrame("EditBox", nil, ui, "InputBoxTemplate")
-    ui.input:SetSize(82, 23)
-    ui.input:SetPoint("TOPLEFT", 577, -176)
-    ui.input:SetNumeric(true)
-    ui.input:SetMaxLetters(8)
-    ui.input:SetAutoFocus(false)
-    ui.input:SetScript("OnEnterPressed", function(self)
-        local data = store()
-        local threshold = math.max(0, tonumber(self:GetText()) or 0) * 100
-        if tab == 1 then data.minVendor = threshold else data.minMarket = threshold end
-        self:ClearFocus()
-        refresh()
+    ui.table.empty=label(ui.table,22,-243,625,''); ui.table.empty:SetHeight(95)
+    button(ui.table,16,-361,60,'<',function()page=math.max(1,page-1); ST.Refresh()end); button(ui.table,80,-361,60,'>',function()page=page+1; ST.Refresh()end)
+    label(ui.table,153,-361,500,'Click for details / live verification. Green margin is not a resale guarantee.')
+    ui.detail=CreateFrame('Frame',nil,ui); ui.detail:SetAllPoints()
+    ui.detail.title=label(ui.detail,18,-207,635,'','GameFontNormal'); ui.detail.body=label(ui.detail,18,-230,636,''); ui.detail.body:SetHeight(104); ui.detail.body:SetJustifyV('TOP')
+    label(ui.detail,18,-336,90,'Fee % (assumed)'); ui.detail.cut=input(ui.detail,113,-337,44)
+    label(ui.detail,172,-336,143,'Deposit gold / full stack'); ui.detail.deposit=input(ui.detail,320,-337,68)
+    button(ui.detail,400,-335,110,'Save costs',function() if not ST.SetFee(ST.selected,ui.detail.cut:GetText(),ui.detail.deposit:GetText()) then ST.message='Enter valid fee percent and deposit gold.'; ST.Refresh()end end)
+    button(ui.detail,520,-335,135,'Back to results',function()panel=nil; ST.Refresh()end)
+    ui.detail.verify=button(ui.detail,18,-361,220,'Verify exact live listing',function()ST.Verify(ST.selected)end)
+    label(ui.detail,248,-364,84,'Paid (copper)'); ui.detail.paid=input(ui.detail,336,-363,92)
+    ui.detail.record=button(ui.detail,442,-361,212,'I bought this: record',function()ST.RecordSelected(ui.detail.paid:GetText())end)
+    ui.settings=CreateFrame('Frame',nil,ui); ui.settings:SetAllPoints(); ui.settings.inputs={}
+    local settings={{'minVendor','Min vendor profit (copper)'},{'vendorROI','Vendor ROI (fraction)'},{'minMarket','Min AH profit (copper)'},{'marketROI','AH ROI (fraction)'},{'positionCap','Position cap (fraction)'},{'totalCap','Total exposure (fraction)'},{'lossCap','Max loss / gold (fraction)'},{'lossFraction','Max loss / cost (fraction)'},{'discount','Min discount (fraction)'},{'failures','Failed posting attempts'}}
+    for i,p in ipairs(settings) do local x=i%2==1 and 18 or 340; local y=-210-math.floor((i-1)/2)*29; label(ui.settings,x,y,222,p[2]); ui.settings.inputs[p[1]]=input(ui.settings,x+225,y,65) end
+    button(ui.settings,18,-361,150,'Save risk limits',function()
+        local cfg={}; for k,e in pairs(ui.settings.inputs) do
+            local n=tonumber(e:GetText()); local valid=n and n>=0 and n<1e10
+            if k=='failures' then valid=valid and n<=20 and n==math.floor(n) elseif k~='minVendor' and k~='minMarket' then valid=valid and n<1 end
+            if not valid then ST.message='Invalid '..k; ST.Refresh(); return end; cfg[k]=n
+        end
+        for k,v in pairs(cfg) do ST.db.settings[k]=v end; ST.vendor={}; ST.market={}; ST.message='Limits saved; rescan to recalculate.'; panel=nil; ST.Refresh()
     end)
-    ui.input:SetScript("OnEscapePressed", function(self) self:ClearFocus(); refresh() end)
-
-    text(22, -215, 632,
-        "ITEM                         QTY       BUYOUT          VALUE          PROFIT           BASIS")
-    list = CreateFrame("ScrollFrame", nil, ui, "UIPanelScrollFrameTemplate")
-    list:SetPoint("TOPLEFT", 16, -240)
-    list:SetSize(650, 151)
-    scroll = CreateFrame("Frame", nil, list)
-    scroll:SetSize(627, 151)
-    list:SetScrollChild(scroll)
-    text(16, -397, 645,
-        "Click a result to search; verify live buyout before purchasing. AH resale is speculative.")
-    ui:Hide()
-    refresh()
+    button(ui.settings,180,-361,150,'Toggle chat alerts',function()ST.db.settings.alerts=not ST.db.settings.alerts; ST.message='Alerts '..(ST.db.settings.alerts and 'on' or 'off'); ST.Refresh()end)
+    button(ui.settings,345,-361,150,'Experimental replicate',function()panel=nil; ST.Start('replicate')end)
+    ui.history=CreateFrame('Frame',nil,ui); ui.history:SetAllPoints(); ui.history.summary=label(ui.history,18,-207,635,''); ui.history.summary:SetHeight(40)
+    ui.history.entries=label(ui.history,18,-249,635,''); ui.history.entries:SetHeight(66)
+    label(ui.history,18,-320,635,'Close entire trade: ID outcome grossCopper feesCopper lostDepositsCopper attempts')
+    ui.history.close=input(ui.history,23,-342,620)
+    button(ui.history,18,-365,155,'Save actual outcome',function()SlashCmdList.FORGESTOCKTRADER('close '..ui.history.close:GetText()); ST.Refresh()end)
+    label(ui.history,183,-365,465,'Outcome: sold, vendored, abandoned. /fst journal shows all records.')
+    ui:Hide(); ST.Refresh()
 end
-
-local function attachTab()
-    if attached or not ahOpen or not AuctionHouseFrame then return end
+function ST.Attach()
+    if not ST.open or not AuctionHouseFrame then return end
+    ST.InstallHooks()
+    if attached then return end
     if not ui then build() end
-    local lib = LibStub and LibStub("LibAHTab-1-0", true)
-    if not lib then
-        scanState = "error"
-        status = "Cannot register AH tab: LibAHTab missing."
-        refresh()
-        print("|cffff5555FORGE StockTrader: LibAHTab unavailable.|r")
-        return
-    end
-    local ok, err = pcall(function()
-        if not lib:DoesIDExist("FORGE_STOCKTRADER") then
-            lib:CreateTab("FORGE_STOCKTRADER", ui, "StockTrader", "FORGE StockTrader")
-        end
-    end)
-    if ok then
-        attached, tabLibrary = true, lib
-        refresh()
-    else
-        print("|cffff5555FORGE StockTrader tab error:|r " .. tostring(err))
-    end
+    lib=LibStub and LibStub('LibAHTab-1-0',true)
+    if not lib then ST.message='LibAHTab missing; installation is incomplete.'; ST.Refresh(); return end
+    local ok,err=pcall(function()if not lib:DoesIDExist('FORGE_STOCKTRADER') then lib:CreateTab('FORGE_STOCKTRADER',ui,'StockTrader','FORGE StockTrader')end end)
+    if ok then attached=true else ST.message='Tab registration failed: '..tostring(err) end; ST.Refresh()
 end
-
 function ST.Toggle()
-    if not ahOpen or not AuctionHouseFrame then
-        print("|cffffcc55FORGE StockTrader:|r Open the Auction House and click the StockTrader tab.")
-        return
-    end
-    if not attached then attachTab() end
-    if tabLibrary then
-        local ok, err = pcall(tabLibrary.SetSelected, tabLibrary, "FORGE_STOCKTRADER")
-        if not ok then print("|cffff5555FORGE StockTrader:|r " .. tostring(err)) end
-    end
+    if not ST.open then print('FORGE StockTrader: Open the Auction House first.'); return end
+    ST.Attach(); if attached then lib:SetSelected('FORGE_STOCKTRADER') end
 end
-
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:RegisterEvent("AUCTION_HOUSE_SHOW")
-f:RegisterEvent("AUCTION_HOUSE_CLOSED")
-f:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
-f:SetScript("OnEvent", function(_, event, arg)
-    if event == "ADDON_LOADED" and arg == ADDON then
-        db = store()
-        SLASH_FORGESTOCKTRADER1 = "/fst"
-        SLASH_FORGESTOCKTRADER2 = "/stocktrader"
-        SlashCmdList.FORGESTOCKTRADER = ST.Toggle
-        print("|cffffcc55FORGE StockTrader|r v0.1.0 loaded. Type /fst")
-    elseif event == "AUCTION_HOUSE_SHOW" then
-        ahOpen = true
-        if C_Timer and C_Timer.After then C_Timer.After(.3, attachTab)
-        else attachTab() end
-        refresh()
-    elseif event == "AUCTION_HOUSE_CLOSED" then
-        ahOpen = false
-        if scan then
-            scan = nil
-            scanState = "error"
-            status = "Scan cancelled because you closed the Auction House."
-        end
-        refresh()
-    elseif event == "REPLICATE_ITEM_LIST_UPDATE" and scan and scan.phase == "waiting" then
-        local n = C_AuctionHouse.GetNumReplicateItems()
-        if type(n) == "number" and n >= 0 then
-            scan.total = n
-            scan.phase = "reading"
-            status = "Reading " .. n .. " auction listings..."
-            refresh()
-        end
-    end
-end)
-f:SetScript("OnUpdate", function()
-    if not scan then return end
-    if scan.phase == "waiting" then
-        if GetTime() - scan.started > 45 then
-            scan = nil
-            scanState = "error"
-            status = "No scan response. The server may be on its 15-minute throttle."
-            refresh()
-        end
-    elseif scan.phase == "reading" then
-        local last = math.min(scan.nextIndex + CHUNK, scan.total)
-        for index = scan.nextIndex, last - 1 do
-            loadRow(index)
-        end
-        scan.nextIndex = last
-        if last >= scan.total then
-            scan.phase = "caching"
-            scan.untilTime = GetTime() + 6
-            status = "Finishing item-price lookups..."
-            refresh()
-        elseif last % 2500 < CHUNK then
-            status = string.format("Reading auctions: %d / %d", last, scan.total)
-            refresh()
-        end
-    elseif scan.phase == "caching" and GetTime() >= scan.untilTime then
-        finishScan()
-    end
-end)
