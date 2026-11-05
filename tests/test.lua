@@ -86,28 +86,36 @@ local frameMethods={}
 function frameMethods:SetScript(k,v)self.scripts[k]=v end
 function frameMethods:SetText(t)self.text=t end;function frameMethods:GetText()return self.text or ''end
 function frameMethods:SetSize(w,h)self.width=w;self.height=h end
+function frameMethods:SetWidth(w)self.width=w end;function frameMethods:SetHeight(h)self.height=h end
+function frameMethods:SetPoint(point,relative,relativePoint,x,y) self.anchor={point,relative,relativePoint,x,y} end
+function frameMethods:SetAllPoints(relative)self.allPoints=relative or self.parent end
+function frameMethods:SetColorTexture(...)self.fill={...}end
+function frameMethods:SetTextColor(...)self.textColor={...}end
+function frameMethods:SetBackdropColor(...)self.backdrop={...}end
+function frameMethods:SetJustifyH(v)self.align=v end
+function frameMethods:SetMaxLines(v)self.maxLines=v end
 function frameMethods:Show()self.shown=true end;function frameMethods:Hide()self.shown=false end
 function frameMethods:SetShown(v)self.shown=v end;function frameMethods:IsShown()return self.shown end
 function frameMethods:SetEnabled(v)self.enabled=v end;function frameMethods:HasFocus()return false end
 function frameMethods:IsObjectType(t)return self.kind==t end;function frameMethods:GetFrameLevel()return 1 end
 function frameMethods:RegisterEvent(e)self.events[e]=true end
 local function frame(kind,name,parent)
-    local f={kind=kind,name=name,parent=parent,scripts={},events={}}
+    local f={kind=kind,name=name,parent=parent,scripts={},events={},shown=true}
     setmetatable(f,{__index=function(_,k)return frameMethods[k] or noop end});created[#created+1]=f;if name then _G[name]=f end;return f
 end
 function CreateFrame(kind,name,parent)return frame(kind,name,parent)end
 function frameMethods:CreateTexture()return frame('Texture',nil,self)end
-function frameMethods:CreateFontString()return frame('FontString',nil,self)end
+function frameMethods:CreateFontString(_,_,font)local f=frame('FontString',nil,self);f.font=font;return f end
 function hooksecurefunc(t,n,fn)local orig=t[n];t[n]=function(...)local result={orig(...)};fn(...);return unpack(result)end end
 PanelTemplates_DeselectTab=noop;PanelTemplates_SelectTab=noop;PanelTemplates_TabResize=noop
-AuctionHouseFrame=frame('Frame','AuctionHouseFrame');AuctionHouseFrame.Tabs={frame('Button')};AuctionHouseFrame.SetDisplayMode=noop
+AuctionHouseFrame=frame('Frame','AuctionHouseFrame');AuctionHouseFrame.Tabs={frame('Button')};AuctionHouseFrame.SetDisplayMode=noop;AuctionHouseFrame.BuyDialog=frame('Frame',nil,AuctionHouseFrame)
 GameTooltip=frame('Tooltip');C_AuctionHouse={};C_Item={}
-for _,name in ipairs({'Lib/LibStub','Lib/LibAHTab','Core','StockTrader'})do assert(loadfile('FORGE_StockTrader/'..name..'.lua'))('FORGE_StockTrader',ST)end
+for _,name in ipairs({'Lib/LibStub','Lib/LibAHTab','Costs','Core','Quotes','StockTrader'})do assert(loadfile('FORGE_StockTrader/'..name..'.lua'))('FORGE_StockTrader',ST)end
 local function event(e,arg)ST.events.scripts.OnEvent(ST.events,e,arg)end
 event('ADDON_LOADED','FORGE_StockTrader');event('AUCTION_HOUSE_SHOW')
 test('native AH attachment and no duplicate tab',function()eq(ST.ui.parent,AuctionHouseFrame);local lib=LibStub('LibAHTab-1-0');eq(#lib.internalState.Tabs,1);ST.Attach();event('AUCTION_HOUSE_SHOW');eq(#lib.internalState.Tabs,1)end)
 test('exactly two trading tabs and switching',function()eq(#ST.ui.tabs,2);ST.ui.tabs[2].scripts.OnClick();eq(ST.tab,2);ST.ui.tabs[1].scripts.OnClick();eq(ST.tab,1)end)
-test('UI shows scan error and completion',function()ST.scan:set('ERROR','test failure');eq(ST.ui.banner.caption.text,'SCAN FAILED: ERROR');ST.scan:set('COMPLETE','done');eq(ST.ui.banner.caption.text,'SCAN COMPLETE')end)
+test('UI shows scan error and completion',function()ST.scan:set('ERROR','test failure');ST.Refresh();eq(ST.ui.banner.caption.text,'SCAN FAILED');ST.scan:set('COMPLETE','done');ST.Refresh();eq(ST.ui.banner.caption.text,'SCAN COMPLETE')end)
 test('UI sorts actual rows',function()ST.vendor={{name='A',profit=1,auctionID=1},{name='B',profit=5,auctionID=2}};local r=ST.VisibleRows();eq(r[1].profit,5);ST.vendor={}end)
 test('closing AH cancels pending scanner',function()ST.scan.active=true;event('AUCTION_HOUSE_CLOSED');eq(ST.scan.state,'CANCELLED');assert(not ST.open);event('AUCTION_HOUSE_SHOW');assert(ST.open)end)
 test('TOC files exist and compile',function()for line in io.lines('FORGE_StockTrader/FORGE_StockTrader.toc')do if line:match('%.lua$')then assert(loadfile('FORGE_StockTrader/'..line))end end end)
@@ -161,13 +169,89 @@ test('failed core scan preserves history and last success',function()
     local before=ST.db.lastScan;local h=ST.db.history;ST.Start('browse');update(2);update(46);eq(ST.scan.state,'TIMEOUT');eq(ST.db.lastScan,before);eq(ST.db.history,h)
 end)
 test('UI risk filters apply and invalidate old decisions',function()
-    ST.ui.settings.inputs.minVendor:SetText('900'); ST.ui.settings.inputs.vendorROI:SetText('0')
-    for k,e in pairs(ST.ui.settings.inputs)do if k~='minVendor' and k~='vendorROI' then e:SetText(tostring(ST.db.settings[k]))end end
+    ST.ui.settings.inputs.minVendor:SetText('0.09'); ST.ui.settings.inputs.vendorROI:SetText('0')
+    for _,spec in ipairs(ST.settingFields)do local k=spec[1];if k~='minVendor' and k~='vendorROI' then ST.ui.settings.inputs[k]:SetText(ST.db.settings[k] and tostring(ST.db.settings[k]/spec[3]) or '')end end
     for _,f in ipairs(created)do if f.text=='Save risk limits' then f.scripts.OnClick()end end
     eq(ST.db.settings.minVendor,900);eq(#ST.vendor,0)
 end)
 test('UI manual actual purchase amount used in journal',function()
     ST.selected=row();ST.RecordSelected('650');eq(ST.db.journal[#ST.db.journal].purchase,650)
 end)
+test('priority scan checks vendor lead before exploration',function()
+    setupAPI();ST.db.settings.scanLimit=10;ST.db.scanCursor=0
+    local keys={};for i=1,20 do keys[i]={itemKey={itemID=i},minPrice=300,totalQuantity=1}end
+    keys[19].minPrice=10
+    local selected=ST.Prioritize({scope='quick'},keys);eq(#selected,10);eq(selected[1].itemKey.itemID,19)
+end)
+test('full scope retains all market keys',function()
+    local keys={};for i=1,70 do keys[i]={itemKey={itemID=i}}end
+    eq(#ST.Prioritize({scope='full'},keys),70)
+end)
+test('per-key callbacks precede whole-scan completion',function()
+    local s,t,_,k=scanner();local calls=0;s.onKey=function(_,groups)calls=calls+1;assert(groups['item:1'])end
+    complete(s,t,k);eq(calls,1)
+end)
+test('pause drains current key, resume finishes scope',function()
+    local s,t,_,k=scanner();s:start();t(2);s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');t();t(2);s:pause();s:event('ITEM_SEARCH_RESULTS_UPDATED',k);t()
+    eq(s.state,'PAUSED');eq(s.checkedKeys,1);assert(not s.active);assert(s:resume());t();eq(s.state,'COMPLETE')
+end)
+test('resume cannot revive cancelled scan',function()local s,t=scanner();s:start();s:stop('CANCELLED');eq(s:resume(),false)end)
+test('automatic commodity deposit requires correct quantity and duration',function()
+    ST.Costs.reset();local r=row();r.source='commodity-depth';r.id=1
+    local a={CalculateCommodityDeposit=function(id,duration,qty)eq(qty,5);eq(duration,2);return 37 end}
+    eq(ST.Costs.deposit(r,2,a),37)
+end)
+test('exact bag variant required for automatic item deposit',function()
+    ST.Costs.reset();ItemLocation={CreateFromBagAndSlot=function(_,bag,slot)return {bag=bag,slot=slot}end}
+    local bags={GetContainerNumSlots=function()return 1 end,GetContainerItemLink=function()return '|Hitem:1|h[Test]|h'end}
+    local api={CalculateItemDeposit=function()return 41 end}
+    eq(ST.Costs.deposit(row(),1,api,{},bags),41);ST.Costs.reset()
+    bags.GetContainerItemLink=function()return '|Hitem:2|h[Other]|h'end
+    eq(ST.Costs.deposit(row(),1,api,{},bags),nil);ItemLocation=nil
+end)
+test('missing deposit remains unknown, never assumed zero',function()
+    ST.Costs.reset();local db={settings={cutBP=500},fees={}};eq(ST.Costs.resolve(db,row()),nil)
+end)
+test('market fee shared, stack deposit remains quantity specific',function()
+    ST.Costs.reset();local db={settings={cutBP=500,duration=1},fees={['item:1']={quantity=5,deposit=10,duration=1}}}
+    eq(ST.Costs.resolve(db,row()).cutBP,500);local r=row();r.count=6;eq(ST.Costs.resolve(db,r),nil)
+end)
+test('duration change invalidates manual deposit',function()
+    local db={settings={cutBP=500,duration=2},fees={['item:1']={quantity=5,deposit=10,duration=1}}};eq(ST.Costs.resolve(db,row()),nil)
+end)
+test('native commodity quote uses server total, not minimum times quantity',function()
+    ST.db.settings.minVendor=1;ST.nativeTarget=row();ST.nativeTarget.id=1;ST.nativeTarget.source='commodity-depth';ST.nativeTarget.executable=false
+    ST.Quotes.start(1,5);ST.Quotes.event('COMMODITY_PRICE_UPDATED',80,450)
+    local r=ST.Quotes.pending.row;eq(r.buyout,450);eq(r.profit,300);eq(r.count,5);assert(r.executable)
+end)
+test('unrelated quote and stale quote never accepted',function()
+    ST.Quotes.start(2,5);eq(ST.Quotes.pending,nil);ST.Quotes.start(1,5);clock=clock+11;ST.Quotes.event('COMMODITY_PRICE_UPDATED',80,450);eq(ST.Quotes.pending,nil)
+end)
+test('quote cancellation invalidates executable status',function()
+    ST.Quotes.start(1,5);ST.Quotes.event('COMMODITY_PRICE_UPDATED',80,450);local r=ST.Quotes.pending.row
+    ST.Quotes.invalidate('cancelled');eq(r.executable,false)
+end)
+test('quotes expire after five seconds and never purchase',function()
+    ST.Quotes.start(1,5);ST.Quotes.event('COMMODITY_PRICE_UPDATED',80,450);local r=ST.Quotes.pending.row;clock=clock+6;ST.Quotes.tick();eq(r.executable,false)
+    local f=assert(io.open('FORGE_StockTrader/Quotes.lua'));local src=f:read('*a');f:close();assert(not src:match('C_AuctionHouse%.ConfirmCommoditiesPurchase%s*%('))
+end)
+test('actual versus planned performance uses closed records only',function()
+    local _,d=D.open({},'m');local r=row();r.profit=100;D.acquire(d,r,100);D.close(d,1,'sold',700,0,0,0,200)
+    local c=D.calibration(d);eq(c.meanError,100);eq(c.sold,1);eq(c.closed,1)
+end)
+test('duplicate manual purchase click is blocked',function()
+    ST.selected=row();local before=#ST.db.journal;ST.RecordSelected('500');ST.RecordSelected('500');eq(#ST.db.journal,before+1)
+end)
+test('diagnostic log is bounded',function()local s=scanner();for i=1,100 do s:set('IDLE',tostring(i))end;eq(#s.log,60)end)
+test('partial key history stays valid after later timeout without full success',function()
+    setupAPI();ST.db.settings.minVendor=1;ST.db.history={};ST.scan.wallStarted=time()
+    local g={row(),row(),row()};for i,r in ipairs(g)do r.auctionID=i;r.observed=time();r.itemKey=key end
+    local before=ST.db.lastScan;ST.KeyComplete(ST.scan,{['item:1']=g});update();assert(ST.db.history['item:1']);ST.scan:stop('TIMEOUT','later key failed');eq(ST.db.lastScan,before)
+end)
+test('same-scan observations cannot validate their own bargain',function()
+    local h=hist();local r=row();r.observed=time();r.referenceBefore=33000
+    local result,reason=ST.Evaluate(r,h);eq(result,nil);assert(reason:match('Insufficient') or reason:match('Stale'))
+end)
+ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end
 print(string.format('%d/%d tests passed (%s)',passed,#tests,_VERSION));assert(passed==#tests,'Test failures')

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — Faster discovery and terminal layout (2026-11-06)
+
+- Quick priority scan (default 60 keys), full scan, early complete-key results, explicit market/selected coverage, pause/resume and shared verification query pacing.
+- Redesign native 676x421 content area with aligned columns, status/progress strip, metric cards, readable gold/% settings and labelled journal outcomes. Exactly two trading tabs.
+- Automatic deposit adapters for commodities and exact owned variants; one commission setting per market, explicit fallback assumptions and duration-specific validation.
+- Passive native commodity quote observation using actual server total/quantity, strict expiry/cancellation and no automatic buying.
+- Descriptive forecast-vs-realized journal evidence, duplicate-record guard, bounded copyable diagnostics and no same-scan pricing leakage.
+- 83 Lua 5.1 tests; actual UI-code mock renders with control bounds/overlap checks; installation package tooling. Live client acceptance remains pending.
+
 ## 0.3.0 — Project Quantum foundation (2026-11-05)
 
 - Replace default replicate-only scanning with full paginated browse and per-key item searches; bounded processing, shared throttle checks, cooperative query cancellation, timeout/error handling, delayed item resolution and staged validation.

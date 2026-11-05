@@ -76,12 +76,13 @@ function M.prices(history,now)
 end
 function M.risk(row, prices, cfg, gold, exposure, position, fee)
     if not row.executable or not row.key then return nil,'No executable listing' end
-    if not fee or not M.integer(fee.cutBP) or fee.cutBP>=10000 or not M.integer(fee.deposit) then
+    if type(fee)~='table' or not M.integer(fee.cutBP) or fee.cutBP>=10000 or not M.integer(fee.deposit) then
         return nil,'Set explicit fee and per-stack deposit assumptions first'
     end
     if fee.quantity and fee.quantity~=row.count then return nil,'Deposit assumption is for a different stack quantity' end
     if not M.integer(row.vendor) or row.restricted then return nil,'Unknown liquidation value' end
     if not M.integer(row.buyout) or row.buyout<1 or not M.integer(row.count) or row.count<1 then return nil,'Invalid stack' end
+    if not M.integer(row.extra or 0) then return nil,'Invalid acquisition costs' end
     local cost=row.buyout+(row.extra or 0); local attempts=cfg.failures or 2
     local lost=fee.deposit*attempts; local gross=floor(prices.conservative*row.count)
     if not M.integer(gross) then return nil,'Amount overflow' end

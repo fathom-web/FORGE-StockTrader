@@ -1,5 +1,5 @@
 local _,ST=...; local M=ST.Model; local D={}; ST.Database=D
-D.defaults={minVendor=100,vendorROI=0,minMarket=10000,marketROI=.3,discount=.3,positionCap=.1,totalCap=.25,lossCap=.02,lossFraction=.5,failures=2,alerts=true}
+D.defaults={minVendor=100,vendorROI=0,minMarket=10000,marketROI=.3,discount=.3,positionCap=.1,totalCap=.25,lossCap=.02,lossFraction=.5,failures=2,alerts=true,scanLimit=60,duration=1}
 function D.open(root,market)
     root=type(root)=='table' and root or {}; root.realms=type(root.realms)=='table' and root.realms or {}
     root.markets=type(root.markets)=='table' and root.markets or {}; root.schema=3
@@ -12,6 +12,8 @@ function D.open(root,market)
     for _,k in ipairs({'positionCap','totalCap','marketROI','vendorROI','discount','lossCap','lossFraction'}) do
         if d.settings[k]>=1 then d.settings[k]=D.defaults[k] end
     end
+    d.settings.scanLimit=math.max(10,math.min(300,math.floor(d.settings.scanLimit)))
+    d.settings.duration=math.max(1,math.min(3,math.floor(d.settings.duration)))
     d.settings.failures=math.min(20,math.floor(d.settings.failures))
     return root,d
 end
@@ -21,6 +23,10 @@ function D.market()
 end
 function D.prune(d,now)
     local keys={}
+    local refs=type(d.browseReferences)=='table' and d.browseReferences or {}; local index={}
+    for key,r in pairs(refs) do if type(r)~='table' or not M.integer(r.at) or now-r.at>7*86400 then refs[key]=nil else index[#index+1]={key=key,at=r.at} end end
+    table.sort(index,function(a,b)return a.at>b.at end); for i=3001,#index do refs[index[i].key]=nil end
+    d.browseReferences=refs
     for key,h in pairs(d.history) do
         local keep={}
         if type(h)=='table' then for _,o in ipairs(h) do
@@ -65,7 +71,7 @@ function D.acquire(d,row,now)
     if #d.journal>=2000 then return nil,'Journal full; export/archive before recording more trades' end
     if not row.key or not M.integer(row.buyout) or row.buyout<1 then return nil,'Invalid purchase' end
     d.nextTrade=(tonumber(d.nextTrade) or 0)+1
-    local t={id=d.nextTrade,key=row.key,name=row.name,quantity=row.count,purchase=row.buyout,at=now,planned=row.value,outcome='held'}
+    local t={id=d.nextTrade,key=row.key,name=row.name,quantity=row.count,purchase=row.buyout,at=now,planned=row.value,plannedProfit=row.profit,conservativeUnit=row.prices and row.prices.conservative,outcome='held'}
     d.journal[#d.journal+1]=t; return t
 end
 function D.close(d,id,outcome,gross,fees,lost,attempts,now)
@@ -91,4 +97,20 @@ function D.performance(d)
     if p.n>0 then p.winRate=p.wins/p.n; p.medianReturn=M.quantile(returns,.5); p.holding=p.holding/p.n end
     p.averageWin=p.wins>0 and p.positive/p.wins or nil; p.averageLoss=p.losses>0 and p.negative/p.losses or nil
     return p
+end
+
+-- Forecast comparison is descriptive personal evidence, never a calibrated sale probability.
+function D.calibration(d,key)
+    local r={closed=0,sold=0,held=0,forecastCount=0,error=0}
+    for _,t in ipairs(d.journal)do
+        if type(t)=='table' and (not key or key==t.key)then
+            if t.outcome=='held' then r.held=r.held+1
+            elseif type(t.profit)=='number' then
+                r.closed=r.closed+1;if t.outcome=='sold' then r.sold=r.sold+1 end
+                if type(t.plannedProfit)=='number' then r.forecastCount=r.forecastCount+1;r.error=r.error+t.profit-t.plannedProfit end
+            end
+        end
+    end
+    if r.forecastCount>0 then r.meanError=r.error/r.forecastCount end
+    return r
 end

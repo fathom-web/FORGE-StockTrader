@@ -68,3 +68,13 @@ Costs already enter planning ROI and downside. These weights are policy choices 
 ## Journal and limitations
 
 Only manually confirmed outcomes produce realized performance. Positive and negative totals, net profit, win rate, median return, average win/loss, largest loss, holding duration and open capital are computed by `Database.performance`; the UI shows a compact subset. Whole-position exits only. A scan disappearing does not close a journal position. No ground-truth calibration, automatic mail matching, strategy backtesting, or prediction-accuracy claim is implemented.
+
+## 0.4.0 amendments
+
+The arithmetic and score above remain unchanged. Quick-scan ranking is **discovery scheduling**, never a trading score: apparent vendor spread first, recent known price discount second, rotating remaining keys third. A default 60-key scope is disclosed alongside full market-index size; full mode has no quick limit. Individual complete-key observations are committed incrementally. Failed/incomplete keys do not enter history. The model's `referenceBefore` boundary prevents the active scan's observations from legitimizing their own opportunities, including later settings reassessment.
+
+Commission is now a single configured market value, with legacy per-item values available as fallback. Deposits prefer live client calculations for exact commodity quantity/duration or an exact owned item variant. Missing values still require an explicit matching assumption. Duration/quantity changes cannot reuse a mismatched deposit. API-derived deposits do not establish that the user-entered commission is correct.
+
+Commodity supply is still not executable evidence. A **player-initiated native quote** adds an explicitly temporary executable price for that precise quantity, using the server's total, not the minimum of its levels. The quote becomes invalid on cancellation, replacement, AH close, purchase outcome or after five seconds. This is a local freshness cap, not a guaranteed server reservation duration. No purchase APIs are called by StockTrader. Both vendor and speculative margins are recalculated on the quoted quantity. The quote's source and freshness remain visible.
+
+Manual purchases also retain the model's planned profit when available. `Database.calibration` reports closed/sold/held counts and mean(actual profit − planned profit) for records with both fields. Open or incomplete outcomes never enter that comparison. This is retrospective descriptive evidence; no probability estimator or automated trading strategy is calibrated from it.
