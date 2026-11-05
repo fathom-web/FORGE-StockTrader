@@ -1,6 +1,7 @@
 local ADDON, ST = ...
 local COOLDOWN, CHUNK, MAX_DEALS = 900, 250, 160
 local scan, ahOpen, tab = nil, false, 1
+local scanState, attached, tabLibrary = "idle", false, nil
 local vendorDeals, marketDeals = {}, {}
 local status = "Open an Auction House and press SCAN."
 local ui, list, scroll, rows = nil, nil, nil, {}
@@ -183,6 +184,14 @@ local function refresh()
     ui.tabs[1]:SetText(tab == 1 and "> VENDOR SELL" or "VENDOR SELL")
     ui.tabs[2]:SetText(tab == 2 and "> AH KOOPJES" or "AH KOOPJES")
     ui.scanButton:SetEnabled(not scan)
+    if ui.banner then
+        local title, r, g, b = "READY TO SCAN", .12, .26, .43
+        if scanState == "running" then title, r, g, b = "SCANNING AUCTIONS...", .58, .36, .06
+        elseif scanState == "done" then title, r, g, b = "SCAN COMPLETE!", .06, .44, .16
+        elseif scanState == "error" then title, r, g, b = "SCAN NOT COMPLETED", .52, .09, .10 end
+        ui.banner.bg:SetColorTexture(r, g, b, .96)
+        ui.banner.caption:SetText(title)
+    end
     ui.scanButton:SetText(scan and "SCANNING..." or "SCAN AUCTION HOUSE")
     local last = data.lastScan and date("%d-%m %H:%M", data.lastScan) or "Never"
     ui.status:SetText(status)
@@ -203,14 +212,14 @@ local function refresh()
         local r = rows[i]
         if not r then
             r = CreateFrame("Button", nil, scroll)
-            r:SetSize(716, 28)
+            r:SetSize(627, 28)
             r:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(i - 1) * 29)
             r.bg = r:CreateTexture(nil, "BACKGROUND")
             r.bg:SetAllPoints()
             r.bg:SetColorTexture(.16, .17, .19, i % 2 == 0 and .6 or .3)
             r.labels = {}
-            local widths = {230, 52, 110, 110, 108, 95}
-            local positions = {6, 239, 292, 402, 513, 623}
+            local widths = {185, 38, 91, 92, 93, 85}
+            local positions = {6, 200, 242, 336, 433, 532}
             for col = 1, 6 do
                 local t = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 t:SetPoint("LEFT", r, "LEFT", positions[col], 0)
@@ -258,18 +267,19 @@ local function refresh()
             r:Hide()
         end
     end
-    scroll:SetHeight(math.max(256, #filtered * 29))
+    scroll:SetHeight(math.max(152, #filtered * 29))
 end
 
 local function startScan()
     if scan then return end
-    if not ahOpen then status = "Open an Auction House first."; refresh(); return end
+    if not ahOpen then status = "Open an Auction House first."; scanState = "error"; refresh(); return end
     if not C_AuctionHouse or not C_AuctionHouse.ReplicateItems then
-        status = "Full AH scan API is unavailable on this client."; refresh(); return
+        status = "Full AH scan API is unavailable on this client."; scanState = "error"; refresh(); return
     end
     local data = store()
     local remaining = COOLDOWN - (time() - (data.lastScan or 0))
     if remaining > 0 then
+        scanState = "idle"
         status = string.format("Full scan cooldown: %dm %02ds.",
             math.floor(remaining / 60), remaining % 60)
         refresh()
@@ -277,11 +287,13 @@ local function startScan()
     end
     scan = { phase = "waiting", started = GetTime(), nextIndex = 0,
              groups = {}, vendor = {}, pending = {}, requests = {}, total = 0 }
+    scanState = "running"
     status = "Requesting complete AH snapshot..."
     refresh()
     local ok, err = pcall(C_AuctionHouse.ReplicateItems)
     if not ok then
         scan = nil
+        scanState = "error"
         status = "Scan failed: " .. tostring(err)
         refresh()
     end
@@ -303,61 +315,70 @@ local function finishScan()
     data.lastScan = time()
     local count = scan.total
     scan = nil
+    scanState = "done"
     status = string.format("Scanned %d auctions. Vendor: %d | AH bargains: %d | No vendor data: %d",
         count, #vendorDeals, #marketDeals, missing)
+    print("|cff55ff77FORGE StockTrader: SCAN COMPLETE!|r " .. count .. " auctions | " .. #vendorDeals .. " vendor deals | " .. #marketDeals .. " AH bargains.")
     refresh()
 end
 
+
 local function build()
-    ui = CreateFrame("Frame", "FORGEStockTraderFrame", UIParent, "BackdropTemplate")
-    ui:SetSize(800, 550)
-    ui:SetPoint("CENTER")
-    ui:SetFrameStrata("HIGH")
-    ui:SetClampedToScreen(true)
-    ui:SetMovable(true)
+    -- Dock into Blizzard's AuctionHouseFrame instead of opening a second window.
+    ui = CreateFrame("Frame", "FORGEStockTraderFrame", AuctionHouseFrame, "BackdropTemplate")
+    ui:SetSize(676, 421)
+    ui:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 30, -39)
+    ui:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 15)
     ui:EnableMouse(true)
-    ui:RegisterForDrag("LeftButton")
-    ui:SetScript("OnDragStart", ui.StartMoving)
-    ui:SetScript("OnDragStop", ui.StopMovingOrSizing)
     ui:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 16, insets = {left = 3, right = 3, top = 3, bottom = 3}})
+        edgeSize = 12, insets = {left = 3, right = 3, top = 3, bottom = 3}})
     ui:SetBackdropColor(.05, .065, .08, .98)
     ui:SetBackdropBorderColor(.55, .43, .23, 1)
-    local function text(x, y, width, label, template)
-        local t = ui:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+
+    local function text(x, y, w, label, font)
+        local t = ui:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
         t:SetPoint("TOPLEFT", ui, "TOPLEFT", x, y)
-        t:SetSize(width, 25)
+        t:SetSize(w, 22)
         t:SetJustifyH("LEFT")
         t:SetText(label)
         return t
     end
-    local title = text(20, -12, 420, "FORGE StockTrader", "GameFontNormalLarge")
+    local title = text(16, -9, 410, "FORGE StockTrader", "GameFontNormalLarge")
     title:SetTextColor(1, .78, .33)
-    text(22, -40, 640, "NOVYX FORGE  /  PRIVATE EDITION  /  WOW FOREVER")
-    local close = CreateFrame("Button", nil, ui, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -5, -5)
-    local function button(label, x, w, onclick)
+    text(18, -34, 620, "NOVYX FORGE  /  PRIVATE EDITION  /  WOW FOREVER")
+
+    local function button(label, x, w, fn)
         local b = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
-        b:SetPoint("TOPLEFT", x, -75)
+        b:SetPoint("TOPLEFT", x, -65)
         b:SetSize(w, 27)
         b:SetText(label)
-        b:SetScript("OnClick", onclick)
+        b:SetScript("OnClick", fn)
         return b
     end
     ui.tabs = {
-        button("VENDOR SELL", 20, 165, function() tab = 1; refresh() end),
-        button("AH KOOPJES", 190, 165, function() tab = 2; refresh() end)
+        button("VENDOR SELL", 16, 135, function() tab = 1; refresh() end),
+        button("AH KOOPJES", 155, 135, function() tab = 2; refresh() end)
     }
-    ui.scanButton = button("SCAN AUCTION HOUSE", 570, 207, startScan)
-    ui.status = text(22, -111, 755, "")
-    ui.status:SetHeight(35)
-    ui.last = text(22, -144, 460, "")
-    ui.count = text(22, -173, 450, "")
-    text(524, -174, 158, "Min. profit (silver):")
+    ui.scanButton = button("SCAN AUCTION HOUSE", 463, 197, startScan)
+
+    ui.banner = CreateFrame("Frame", nil, ui)
+    ui.banner:SetPoint("TOPLEFT", 16, -102)
+    ui.banner:SetSize(643, 29)
+    ui.banner.bg = ui.banner:CreateTexture(nil, "BACKGROUND")
+    ui.banner.bg:SetAllPoints()
+    ui.banner.caption = ui.banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.banner.caption:SetPoint("CENTER")
+
+    ui.status = text(18, -135, 635, "")
+    ui.status:SetHeight(24)
+    ui.last = text(18, -159, 405, "")
+    ui.count = text(18, -183, 410, "")
+    text(424, -183, 145, "Min. profit (silver):")
+
     ui.input = CreateFrame("EditBox", nil, ui, "InputBoxTemplate")
-    ui.input:SetSize(88, 23)
-    ui.input:SetPoint("TOPLEFT", 682, -166)
+    ui.input:SetSize(82, 23)
+    ui.input:SetPoint("TOPLEFT", 577, -176)
     ui.input:SetNumeric(true)
     ui.input:SetMaxLetters(8)
     ui.input:SetAutoFocus(false)
@@ -369,23 +390,55 @@ local function build()
         refresh()
     end)
     ui.input:SetScript("OnEscapePressed", function(self) self:ClearFocus(); refresh() end)
-    text(28, -209, 740,
-        "ITEM                                               QTY        BUYOUT              VALUE             PROFIT             BASIS")
+
+    text(22, -215, 632,
+        "ITEM                         QTY       BUYOUT          VALUE          PROFIT           BASIS")
     list = CreateFrame("ScrollFrame", nil, ui, "UIPanelScrollFrameTemplate")
-    list:SetPoint("TOPLEFT", 21, -238)
-    list:SetSize(734, 260)
+    list:SetPoint("TOPLEFT", 16, -240)
+    list:SetSize(650, 151)
     scroll = CreateFrame("Frame", nil, list)
-    scroll:SetSize(718, 260)
+    scroll:SetSize(627, 151)
     list:SetScrollChild(scroll)
-    text(22, -512, 754,
-        "Click a deal to search. Verify the live listing. AH resale is speculation, never guaranteed.")
+    text(16, -397, 645,
+        "Click a result to search; verify live buyout before purchasing. AH resale is speculative.")
     ui:Hide()
     refresh()
 end
 
-function ST.Toggle()
+local function attachTab()
+    if attached or not ahOpen or not AuctionHouseFrame then return end
     if not ui then build() end
-    if ui:IsShown() then ui:Hide() else ui:Show(); refresh() end
+    local lib = LibStub and LibStub("LibAHTab-1-0", true)
+    if not lib then
+        scanState = "error"
+        status = "Cannot register AH tab: LibAHTab missing."
+        refresh()
+        print("|cffff5555FORGE StockTrader: LibAHTab unavailable.|r")
+        return
+    end
+    local ok, err = pcall(function()
+        if not lib:DoesIDExist("FORGE_STOCKTRADER") then
+            lib:CreateTab("FORGE_STOCKTRADER", ui, "StockTrader", "FORGE StockTrader")
+        end
+    end)
+    if ok then
+        attached, tabLibrary = true, lib
+        refresh()
+    else
+        print("|cffff5555FORGE StockTrader tab error:|r " .. tostring(err))
+    end
+end
+
+function ST.Toggle()
+    if not ahOpen or not AuctionHouseFrame then
+        print("|cffffcc55FORGE StockTrader:|r Open the Auction House and click the StockTrader tab.")
+        return
+    end
+    if not attached then attachTab() end
+    if tabLibrary then
+        local ok, err = pcall(tabLibrary.SetSelected, tabLibrary, "FORGE_STOCKTRADER")
+        if not ok then print("|cffff5555FORGE StockTrader:|r " .. tostring(err)) end
+    end
 end
 
 local f = CreateFrame("Frame")
@@ -402,17 +455,20 @@ f:SetScript("OnEvent", function(_, event, arg)
         print("|cffffcc55FORGE StockTrader|r v0.1.0 loaded. Type /fst")
     elseif event == "AUCTION_HOUSE_SHOW" then
         ahOpen = true
+        if C_Timer and C_Timer.After then C_Timer.After(.3, attachTab)
+        else attachTab() end
         refresh()
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         if scan then
             scan = nil
+            scanState = "error"
             status = "Scan cancelled because you closed the Auction House."
         end
         refresh()
     elseif event == "REPLICATE_ITEM_LIST_UPDATE" and scan and scan.phase == "waiting" then
         local n = C_AuctionHouse.GetNumReplicateItems()
-        if type(n) == "number" and n > 0 then
+        if type(n) == "number" and n >= 0 then
             scan.total = n
             scan.phase = "reading"
             status = "Reading " .. n .. " auction listings..."
@@ -425,6 +481,7 @@ f:SetScript("OnUpdate", function()
     if scan.phase == "waiting" then
         if GetTime() - scan.started > 45 then
             scan = nil
+            scanState = "error"
             status = "No scan response. The server may be on its 15-minute throttle."
             refresh()
         end
