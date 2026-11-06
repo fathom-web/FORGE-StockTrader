@@ -2,7 +2,7 @@
 ## Title: FORGE StockTrader
 ## Notes: Vendor arbitrage and speculative Auction House bargains for WoW Forever
 ## Author: Novyx Forge
-## Version: 0.4.1
+## Version: 0.4.2
 ## OptionalDeps: Auctionator
 ## SavedVariables: FORGEStockTraderDB
 

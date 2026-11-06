@@ -1,5 +1,5 @@
 local ADDON,ST=...; local M,D=ST.Model,ST.Database
-ST.version='0.4.1'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
+ST.version='0.4.2'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
 ST.message='Quick scan checks priority items first. Full scan builds wider price history.'
 ST.commodities={}; ST.pendingGroups={}
 function ST.money(n)
@@ -14,12 +14,12 @@ local function changed() ST.dirty=true end
 ST.Changed=changed
 local function itemInfo(link,id)
     if not C_Item or not C_Item.GetItemInfo then return nil end
-    local name,full,quality,_,_,_,_,_,_,_,vendor,_,_,bind=C_Item.GetItemInfo(link or id)
+    local name,full,quality,_,_,_,_,_,_,icon,vendor,_,_,bind=C_Item.GetItemInfo(link or id)
     if not name or type(vendor)~='number' then
         if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(id) end
         return nil
     end
-    return {name=name,link=link or full,quality=quality,vendor=vendor,restricted=bind==1 or bind==4}
+    return {name=name,link=link or full,quality=quality,icon=icon,vendor=vendor,restricted=bind==1 or bind==4}
 end
 function ST.Resolve(kind,index,key,api)
     local r
@@ -55,6 +55,7 @@ function ST.Resolve(kind,index,key,api)
     end
     local info=itemInfo(r.link,r.id); if not info then return nil,'Waiting for item information' end
     r.name,r.quality,r.vendor,r.restricted=info.name,info.quality,info.vendor,info.restricted
+    r.icon=info.icon
     r.link=r.link or info.link; r.observed=time()
     return r
 end

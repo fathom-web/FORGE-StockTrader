@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 — Item icons and NPC sell prices
+
+Show the item icon and sortable NPC sale price per unit in the results. Item details and tooltips also show the total NPC value for an executable quantity.
+
 ## 0.4.1 — Copper Rod price-level correction
 
 Exclude multi-unit item-search rows from both scans and live verification. A grouped quantity of 3103 at a displayed 100 copper cannot establish a full-stack buyout of 100 copper. Archive ambiguous legacy history on first use and clear its discovery references. Preserve journal records and settings.

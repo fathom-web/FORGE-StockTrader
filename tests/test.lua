@@ -277,6 +277,17 @@ test('legacy ambiguous prices isolated on first use only',function()
     eq(d.browseReferences.rod,nil);eq(d.journal[1].id,7)
     D.open(root,'m');eq(d.pre041PriceArchive.rod[1],bad)
 end)
+test('item display uses NPC value independent of speculative resale',function()
+    setupAPI()
+    liveCount,livePrice=1,100
+    local d=ST.Resolve('detail',1,key,C_AuctionHouse)
+    eq(d.icon,1)
+    d.value=99999
+    ST.vendor={d};ST.tab=1;ST.SetPanel('results')
+    eq(ST.ui.rows[1].labels[7].text,ST.money(d.vendor))
+    ST.Select(d);assert(ST.ui.detail.sell.text:find('NPC total: '..ST.money(d.vendor),1,true))
+    d.executable=false;ST.Refresh();assert(ST.ui.detail.sell.text:find('NPC total: --',1,true))
+end)
 ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end
 print(string.format('%d/%d tests passed (%s)',passed,#tests,_VERSION));assert(passed==#tests,'Test failures')

@@ -21,10 +21,28 @@ local function tooltip(owner,lines,link)
     GameTooltip:SetOwner(owner,'ANCHOR_RIGHT');if link then GameTooltip:SetHyperlink(link) else GameTooltip:SetText(lines[1] or '') end
     for i=2,#lines do GameTooltip:AddLine(lines[i],.85,.88,.9,true)end;GameTooltip:Show()
 end
+local function itemIcon(parent, x, y, size)
+    local icon = parent:CreateTexture(nil, 'ARTWORK')
+    icon:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, -y)
+    icon:SetSize(size, size)
+    return icon
+end
+
+local function vendorTotal(row)
+    if row.executable and M.integer(row.count) and row.count > 0 and M.integer(row.vendor) then
+        return ST.money(row.vendor * row.count)
+    end
+    return '--'
+end
+
 function ST.DetailLines(r)
     local lines={r.name or 'Item',r.reason or 'Positive vendor margin. Verify the exact auction before buying.',
         'Observed '..date('%d-%m %H:%M:%S',r.observed or time()),'Quantity '..r.count..' | Buyout '..ST.money(r.buyout),
         'ROI '..string.format('%.1f%%',(r.roi or 0)*100)..' | Profit/item '..ST.money((r.profit or 0)/r.count),r.verification or 'NOT REVERIFIED'}
+    lines[#lines+1] = 'NPC sell / item: '..ST.money(r.vendor)
+    if r.executable then
+        lines[#lines+1] = 'NPC sell for '..r.count..': '..vendorTotal(r)
+    end
     if r.prices then
         lines[#lines+1]=r.prices.method
         lines[#lines+1]='Base/unit '..ST.money(r.prices.base)..' | Upside/unit '..ST.money(r.prices.optimistic)
@@ -123,6 +141,8 @@ function ST.Refresh()
             local d=data[(page-1)*ui.rowCount+i];r.deal=d;r:SetShown(d~=nil)
             if d then
                 local expired=time()-(d.observed or 0)>120 or (d.quoteUntil and GetTime()>d.quoteUntil)
+                r.icon:SetTexture(d.icon or 134400)
+                r.labels[7]:SetText(ST.money(d.vendor))
                 r.labels[1]:SetText(d.name);r.labels[2]:SetText(tostring(d.count));r.labels[3]:SetText(ST.money(d.buyout));r.labels[4]:SetText(d.profit and ST.money(d.profit) or '--')
                 r.labels[5]:SetText(d.roi and string.format('%.1f%%',d.roi*100) or '--')
                 r.labels[6]:SetText(expired and 'STALE' or (d.source=='commodity-depth' and 'QUOTE NEEDED' or (d.score and tostring(d.score)..'/100' or 'RECHECK')))
@@ -132,6 +152,8 @@ function ST.Refresh()
     elseif panel=='detail' then
         local d=ST.selected;if not d then panel='results';return ST.Refresh()end
         local p=ui.detail
+        p.icon:SetTexture(d.icon or 134400)
+        p.sell:SetText('NPC sell / item: '..ST.money(d.vendor)..'   |   NPC total: '..vendorTotal(d))
         p.title:SetText(d.name..'  x'..d.count);p.status:SetText(d.verification or 'SNAPSHOT - RECHECK BEFORE BUYING')
         p.metrics[1]:SetText(ST.money(d.buyout));p.metrics[2]:SetText(ST.money(d.profit));p.metrics[3]:SetText(d.downside and ST.money(-d.downside) or ST.money(d.value));p.metrics[4]:SetText(d.safe and ST.money(d.safe) or (d.roi and string.format('%.1f%% ROI',d.roi*100) or '--'))
         color(p.metrics[2],(d.profit or 0)>0 and 'green' or 'amber')
@@ -177,13 +199,16 @@ local function build()
     ui.commodity=button(ui,524,164,134,'Commodities',function()ST.view=ST.view=='commodities' and nil or 'commodities';panel='results';page=1;ST.Refresh()end)
     ui.panels={};for _,name in ipairs({'results','detail','settings','journal','diagnostics'})do local f=CreateFrame('Frame',nil,ui);f:SetAllPoints(ui);ui.panels[name]=f end
     ui.table=ui.panels.results;ui.detail=ui.panels.detail;ui.settings=ui.panels.settings;ui.history=ui.panels.journal;ui.diagnostics=ui.panels.diagnostics
-    local columns={{18,214,'ITEM','name'},{238,38,'QTY','count'},{282,108,'BUYOUT','buyout'},{396,108,'NET PROFIT','profit'},{510,57,'ROI','roi'},{573,85,'STATUS','score'}}
+    local columns={{18,155,'ITEM','name'},{176,38,'QTY','count'},{217,96,'BUYOUT','buyout'},
+        {417,96,'NET PROFIT','profit'},{516,54,'ROI','roi'},{573,85,'STATUS','score'},
+        {316,98,'NPC / ITEM','vendor'}}
     for _,col in ipairs(columns)do local field=col[4];button(ui.table,col[1],199,col[2],col[3],function()if sort==field then ascending=not ascending else sort=field;ascending=false end;ST.Refresh()end)end
     ui.rows={};ui.rowCount=5
     for i=1,ui.rowCount do
         local r=CreateFrame('Button',nil,ui.table);r:SetPoint('TOPLEFT',ui.table,'TOPLEFT',18,-(228+(i-1)*27));r:SetSize(w-36,25)
         texture(r,0,0,w-36,25,i%2==0 and 'surface' or 'bg');r:SetHighlightTexture('Interface\\QuestFrame\\UI-QuestTitleHighlight','ADD');r.labels={}
-        for j,col in ipairs(columns)do local t=label(r,col[1]-18+5,5,col[2]-10,'');t:SetMaxLines(1);if j>1 then t:SetJustifyH(j==6 and 'LEFT' or 'RIGHT')end;r.labels[j]=t end
+        r.icon=itemIcon(r,3,3,19)
+        for j,col in ipairs(columns)do local inset=j==1 and 25 or 5;local t=label(r,col[1]-18+inset,5,col[2]-inset-5,'');t:SetMaxLines(1);if j>1 then t:SetJustifyH(j==6 and 'LEFT' or 'RIGHT')end;r.labels[j]=t end
         r:SetScript('OnClick',function(self)if self.deal then ST.Select(self.deal)end end)
         r:SetScript('OnEnter',function(self)if self.deal then tooltip(self,ST.DetailLines(self.deal),self.deal.link)end end);r:SetScript('OnLeave',function()GameTooltip:Hide()end);ui.rows[i]=r
     end
@@ -192,10 +217,11 @@ local function build()
     ui.table.page=label(ui.table,108,371,190,'');ui.count=label(ui,310,371,348,'');ui.count:SetMaxLines(1);color(ui.count,'muted')
     ui.note=label(ui,18,400,w-36,'');ui.note:SetMaxLines(1);color(ui.note,'muted')
     -- Details: strong numeric hierarchy; formulas and scenarios live in the explanation tooltip.
-    local p=ui.detail;p.title=label(p,18,200,400,'','GameFontNormal');p.title:SetMaxLines(1)
+    local p=ui.detail;p.icon=itemIcon(p,18,197,31);p.title=label(p,57,197,475,'','GameFontNormal');p.title:SetMaxLines(1)
     button(p,548,196,110,'Back',function()panel='results';ST.Refresh()end)
-    p.status=label(p,18,220,635,'');p.status:SetMaxLines(1);color(p.status,'amber')
-    p.metrics={};for i,t in ipairs({'BUYOUT','NET PROFIT','DOWNSIDE / VALUE','MAX BUY / ROI'})do p.metrics[i]=metric(p,18+(i-1)*163,242,151,t)end
+    p.sell=label(p,57,215,480,'');color(p.sell,'gold')
+    p.status=label(p,18,231,635,'');p.status:SetMaxLines(1);color(p.status,'amber')
+    p.metrics={};for i,t in ipairs({'BUYOUT','NET PROFIT','DOWNSIDE / VALUE','MAX BUY / ROI'})do p.metrics[i]=metric(p,18+(i-1)*163,249,151,t)end
     p.reason=label(p,18,298,508,'');p.reason:SetMaxLines(1)
     local explain=button(p,548,293,110,'Explain',function()if ST.selected then tooltip(p,ST.DetailLines(ST.selected))end end)
     explain:SetScript('OnLeave',function()GameTooltip:Hide()end)

@@ -1,4 +1,4 @@
-# FORGE StockTrader — Quantum 0.4.1
+# FORGE StockTrader — Quantum 0.4.2
 
 **Buy Low. Sell High. Protect Your Gold.** A private-use WoW Forever addon by [Novyx Forge](https://novyxforge.com), interface 16001. Native Auction House integration, exactly **Vendor Sell** and **AH Koopjes**. No CurseForge publication or purchase automation.
 
@@ -76,7 +76,7 @@ The journal shows realized net, open capital, recorded win rate and **actual pro
 python3 -m pip install lupa Pillow
 python3 tests/run.py
 python3 tests/render_ui.py /tmp/stocktrader-ui
-python3 tools/package.py /tmp/FORGE_StockTrader_0.4.1.zip
+python3 tools/package.py /tmp/FORGE_StockTrader_0.4.2.zip
 ```
 
 The tests explicitly run **Lua 5.1**. The renderer loads the actual Lua UI through frame mocks, uses synthetic fixtures, checks visible control bounds/overlap, and renders results/details/settings/journal. It is a layout check, **not an in-game screenshot**.
