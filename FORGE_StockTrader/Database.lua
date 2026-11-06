@@ -6,6 +6,29 @@ function D.open(root,market)
     -- Legacy realms remain intact; their market provenance is insufficient for model use.
     local d=root.markets[market]; if type(d)~='table' then d={}; root.markets[market]=d end
     for _,k in ipairs({'history','journal','fees','settings'}) do if type(d[k])~='table' then d[k]={} end end
+    if d.priceBasisVersion ~= 1 then
+        -- Old per-unit estimates may have divided a unit ask by market depth.
+        -- Keep the affected observations available for inspection.
+        local archive = {}
+        for key, observations in pairs(d.history) do
+            if type(observations) == 'table' then
+                local retained = {}
+                for _, observation in ipairs(observations) do
+                    if type(observation) == 'table' and
+                       (observation.source == 'commodity-depth' or observation.maxStack == 1) then
+                        retained[#retained + 1] = observation
+                    else
+                        archive[key] = archive[key] or {}
+                        table.insert(archive[key], observation)
+                    end
+                end
+                d.history[key] = retained
+            end
+        end
+        d.pre041PriceArchive = archive
+        d.browseReferences = {}
+        d.priceBasisVersion = 1
+    end
     for k,v in pairs(D.defaults) do
         if type(d.settings[k])~=type(v) or (type(v)=='number' and (not (d.settings[k]>=0) or d.settings[k]==math.huge)) then d.settings[k]=v end
     end

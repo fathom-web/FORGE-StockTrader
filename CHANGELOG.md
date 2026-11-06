@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — Copper Rod price-level correction
+
+Exclude multi-unit item-search rows from both scans and live verification. A grouped quantity of 3103 at a displayed 100 copper cannot establish a full-stack buyout of 100 copper. Archive ambiguous legacy history on first use and clear its discovery references. Preserve journal records and settings.
+
 ## 0.4.0 — Faster discovery and terminal layout (2026-11-06)
 
 - Quick priority scan (default 60 keys), full scan, early complete-key results, explicit market/selected coverage, pause/resume and shared verification query pacing.

@@ -1,4 +1,4 @@
-# FORGE StockTrader — Quantum 0.4.0
+# FORGE StockTrader — Quantum 0.4.1
 
 **Buy Low. Sell High. Protect Your Gold.** A private-use WoW Forever addon by [Novyx Forge](https://novyxforge.com), interface 16001. Native Auction House integration, exactly **Vendor Sell** and **AH Koopjes**. No CurseForge publication or purchase automation.
 
@@ -22,6 +22,8 @@
 Requests share the AH throttle, are at least two seconds apart, and never intentionally overlap. The UI refresh is limited to once per second except meaningful state/data changes. Each result keeps its own age; listings older than 120 seconds are marked stale. **Reverify immediately before any manual purchase.**
 
 ## Vendor Sell
+
+Forever may group many units at one displayed item-search price. Only single-unit item-search rows enter pricing, history and recommendations. A multi-unit commodity requires a quantity-matched native total quote. Ambiguous multi-unit item listings are skipped, including potentially genuine stacks.
 
 Positive integer-copper margin = vendor unit value × full quantity − complete buyout − known extra acquisition costs. Default minimum: 1 silver. Item detail shows buyout, profit, total vendor value, ROI, source and age. Sorting supports item, quantity, buyout, profit, ROI and score/status.
 
@@ -74,7 +76,7 @@ The journal shows realized net, open capital, recorded win rate and **actual pro
 python3 -m pip install lupa Pillow
 python3 tests/run.py
 python3 tests/render_ui.py /tmp/stocktrader-ui
-python3 tools/package.py /tmp/FORGE_StockTrader_0.4.0.zip
+python3 tools/package.py /tmp/FORGE_StockTrader_0.4.1.zip
 ```
 
 The tests explicitly run **Lua 5.1**. The renderer loads the actual Lua UI through frame mocks, uses synthetic fixtures, checks visible control bounds/overlap, and renders results/details/settings/journal. It is a layout check, **not an in-game screenshot**.

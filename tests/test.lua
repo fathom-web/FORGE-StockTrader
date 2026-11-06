@@ -127,9 +127,9 @@ test('position sizing never invents extra purchasable stacks',function()
     local c=cfg();c.minMarket=1;eq(M.risk(row(),prices,c,100000,0,0,fee).maxQuantity,5)
 end)
 local key={itemID=1,itemLevel=0,itemSuffix=0,battlePetSpeciesID=0}
-local livePrice,liveCount,liveID=500,5,1
+local livePrice,liveCount,liveID=500,1,1
 local function setupAPI()
-    C_Item.GetItemInfo=function()return 'Test','|Hitem:1|h[Test]|h',1,1,1,'','',20,'',1,150,0,0,0 end
+    C_Item.GetItemInfo=function()return 'Test','|Hitem:1|h[Test]|h',1,1,1,'','',20,'',1,750,0,0,0 end
     C_AuctionHouse.IsThrottledMessageSystemReady=function()return true end
     C_AuctionHouse.SendBrowseQuery=noop; C_AuctionHouse.SendSearchQuery=noop
     C_AuctionHouse.HasFullBrowseResults=function()return true end
@@ -179,7 +179,7 @@ test('UI manual actual purchase amount used in journal',function()
 end)
 test('priority scan checks vendor lead before exploration',function()
     setupAPI();ST.db.settings.scanLimit=10;ST.db.scanCursor=0
-    local keys={};for i=1,20 do keys[i]={itemKey={itemID=i},minPrice=300,totalQuantity=1}end
+    local keys={};for i=1,20 do keys[i]={itemKey={itemID=i},minPrice=900,totalQuantity=1}end
     keys[19].minPrice=10
     local selected=ST.Prioritize({scope='quick'},keys);eq(#selected,10);eq(selected[1].itemKey.itemID,19)
 end)
@@ -251,6 +251,31 @@ end)
 test('same-scan observations cannot validate their own bargain',function()
     local h=hist();local r=row();r.observed=time();r.referenceBefore=33000
     local result,reason=ST.Evaluate(r,h);eq(result,nil);assert(reason:match('Insufficient') or reason:match('Stale'))
+end)
+test('Copper Rod price level never becomes an executable stack',function()
+    setupAPI()
+    livePrice,liveCount=100,3103
+    C_Item.GetItemInfo=function() return 'Copper Rod','|Hitem:6217|h[Copper Rod]|h',1,1,1,'','',1,'',1,24,0,0,0 end
+    ST.db.settings.minVendor=0
+    fullCoreScan()
+    eq(ST.scan.state,'COMPLETE');eq(#ST.vendor,0);eq(#ST.market,0);eq(#ST.scan.rows,0)
+    local old={id=1,key='item:1',count=3103,buyout=100,itemKey=key,auctionID=1}
+    ST.Verify(old);update(2);event('ITEM_SEARCH_RESULTS_UPDATED',key)
+    for i=1,4 do update() end
+    eq(old.verification,'STALE OPPORTUNITY')
+    liveCount=1
+    local single=ST.Resolve('detail',1,key,C_AuctionHouse)
+    eq(single.vendor*single.count-single.buyout,-76)
+    eq(M.vendor(single,ST.db.settings),nil)
+end)
+test('legacy ambiguous prices isolated on first use only',function()
+    local bad={source='item-search',maxStack=3103,price=100/3103}
+    local safe={source='item-search',maxStack=1,price=100}
+    local root={markets={m={history={rod={bad,safe}},browseReferences={rod=1},journal={{id=7}}}}}
+    local _,d=D.open(root,'m')
+    eq(#d.history.rod,1);eq(d.history.rod[1],safe);eq(d.pre041PriceArchive.rod[1],bad)
+    eq(d.browseReferences.rod,nil);eq(d.journal[1].id,7)
+    D.open(root,'m');eq(d.pre041PriceArchive.rod[1],bad)
 end)
 ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end

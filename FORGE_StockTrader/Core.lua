@@ -1,5 +1,5 @@
 local ADDON,ST=...; local M,D=ST.Model,ST.Database
-ST.version='0.4.0'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
+ST.version='0.4.1'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
 ST.message='Quick scan checks priority items first. Full scan builds wider price history.'
 ST.commodities={}; ST.pendingGroups={}
 function ST.money(n)
@@ -27,6 +27,14 @@ function ST.Resolve(kind,index,key,api)
         local v=api.GetItemSearchResultInfo(key,index)
         if not v then return nil,'Missing item search record' end
         if not v.buyoutAmount or v.buyoutAmount==0 or v.containsOwnerItem or v.containsAccountItem then return false end
+        if not M.integer(v.quantity) or v.quantity < 1 then
+            return nil, 'Missing item search quantity'
+        end
+        -- Forever can group many units at one displayed buyout. With a single
+        -- unit both interpretations agree. Other rows need a confirmed total.
+        if v.quantity > 1 then
+            return false
+        end
         if not v.itemLink or not M.key(v.itemLink) or not M.integer(v.auctionID) then return nil,'Missing exact variant or auction ID' end
         r={id=key.itemID,key=M.key(v.itemLink),link=v.itemLink,count=v.quantity,buyout=v.buyoutAmount,auctionID=v.auctionID,
            itemKey=key,executable=true,source='item-search'}

@@ -1,12 +1,12 @@
-# Validation — 0.4.0 (2026-11-06)
+# Validation — 0.4.1 (2026-11-06)
 
 ## What has actually been checked
 
-- **83/83 automated tests passed on Lua 5.1** (`lupa.lua51`). Includes original arithmetic/history/risk/migration coverage plus priority scheduling, full scope, incremental complete-key publication, pause/resume, automatic deposit adapters, variant/quantity/duration checks, native-quote server totals, unrelated/stale/cancelled/expired quotes, journal duplicate protection, descriptive forecast comparison, and bounded diagnostics.
+- **85/85 automated tests passed on Lua 5.1** (`lupa.lua51`). Includes original arithmetic/history/risk/migration coverage plus priority scheduling, full scope, incremental complete-key publication, pause/resume, automatic deposit adapters, variant/quantity/duration checks, native-quote server totals, unrelated/stale/cancelled/expired quotes, journal duplicate protection, descriptive forecast comparison, and bounded diagnostics.
 - The actual Lua UI declarations were rendered with synthetic data through frame mocks for results, details, settings and journal. Visible controls are checked for staying within the 676×421 native content area and for overlap. The four rendered states were visually inspected. Native WoW fonts, textures, taint and screen scaling are not reproduced by that renderer.
 - TOC load paths compile; the install package validates every listed Lua dependency and excludes tests/development files.
 
-**No live Forever client was available. No actual auction was bought or sold, and live scan completion remains unverified.** Steps that require a running game and real transaction outcomes cannot be declared complete by offline tests.
+Player screenshots confirm the 0.4.0 quick scan completed in Thunder Bluff. A subsequent full scan exposed the Copper Rod price-level bug. The 0.4.1 correction passes a reproduction with 3103 units, a 100-copper ask and a 24-copper vendor value. Live confirmation of the patched build remains pending. Steps that require a running game and real transaction outcomes cannot be declared complete by offline tests.
 
 ## API evidence inspected
 
