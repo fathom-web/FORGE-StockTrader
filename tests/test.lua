@@ -288,6 +288,22 @@ test('item display uses NPC value independent of speculative resale',function()
     ST.Select(d);assert(ST.ui.detail.sell.text:find('NPC total: '..ST.money(d.vendor),1,true))
     d.executable=false;ST.Refresh();assert(ST.ui.detail.sell.text:find('NPC total: --',1,true))
 end)
+test('buy click opens native confirmation only after exact fresh affordable verification',function()
+    setupAPI(); liveCount,livePrice,liveID=1,500,1
+    ST.db.settings.minVendor=1;ST.tab=1;fullCoreScan()
+    local r=ST.vendor[1];ST.Select(r);ST.ui.IsVisible=function()return true end
+    local calls=0
+    AuctionHouseFrame.StartItemBuyout=function(_,id,price)eq(id,1);eq(price,500);calls=calls+1 end
+    local function finish()
+        update(2);event('ITEM_SEARCH_RESULTS_UPDATED',key);for i=1,4 do update()end
+    end
+    ST.ui.detail.buy.scripts.OnClick();eq(calls,0);finish();eq(calls,1)
+    livePrice=510;ST.BuySelected();finish();eq(calls,1)
+    liveID=2;ST.BuySelected();finish();eq(calls,1)
+    liveID=1;livePrice=500;ST.BuySelected();ST.SetPanel('results');finish();eq(calls,1)
+    ST.Select(r);local original=GetMoney;GetMoney=function()return 1 end
+    ST.BuySelected();finish();eq(calls,1);GetMoney=original
+end)
 ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end
 print(string.format('%d/%d tests passed (%s)',passed,#tests,_VERSION));assert(passed==#tests,'Test failures')

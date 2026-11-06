@@ -1,5 +1,5 @@
 local ADDON,ST=...; local M,D=ST.Model,ST.Database
-ST.version='0.4.2'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
+ST.version='0.4.3'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
 ST.message='Quick scan checks priority items first. Full scan builds wider price history.'
 ST.commodities={}; ST.pendingGroups={}
 function ST.money(n)
@@ -159,7 +159,7 @@ function ST.Cancel()
     if ST.Quotes then ST.Quotes.invalidate('Cancelled') end
     ST.message='Cancelled'; changed()
 end
-function ST.Verify(row)
+function ST.Verify(row, onVerified)
     if row and (row.source=='commodity-depth' or row.source=='commodity-quote') then ST.OpenNative(row); return end
     if not row or not ST.open or ST.scan.active or ST.analysis or (ST.verify and ST.verify.active) then ST.message='Finish the scan before verifying a listing.'; changed(); return end
     if not row.itemKey then ST.message='Snapshot lacks exact search key. Search manually; NOT VERIFIED.'; changed(); return end
@@ -167,7 +167,7 @@ function ST.Verify(row)
     local v=ST.Scanner.new(C_AuctionHouse,GetTime,ST.Resolve,function(v) if not v.active and v.state~='VALIDATING' then ST.message=v.message end; changed() end); ST.verify=v; v.lastRequest=ST.scan.lastRequest; v.lastExternal=ST.scan.lastExternal
     v:start('browse'); v.request=nil; v.keys={{itemKey=row.itemKey}}; v.keyIndex=0; v:nextKey()
     v.onComplete=function(s)
-        local found
+        local found, verified
         for _,live in ipairs(s.rows) do
             if live.key==row.key and live.auctionID==row.auctionID and live.count==row.count then found=live; break end
         end
@@ -179,11 +179,51 @@ function ST.Verify(row)
             if not calc or (row.safe and found.buyout>row.safe) then row.verification='DO NOT BUY: '..(reason or 'Price exceeds previous limit')
             else
                 for k,value in pairs(found) do row[k]=value end; for k,value in pairs(calc) do row[k]=value end
-                row.verification='VERIFIED NOW - buy manually in native AH'; row.verifiedAt=time()
+                row.verification='VERIFIED NOW - buy manually in native AH'; row.verifiedAt=time(); verified=true
             end
         end
-        s:set('COMPLETE',row.verification); ST.message=row.verification; changed()
+        s:set('COMPLETE',row.verification); ST.message=row.verification
+        if verified and onVerified then onVerified(found) end
+        changed()
     end
+end
+-- A click authorizes opening Blizzard's buyout dialog for this one listing.
+-- The native confirmation owns the transaction and any extra unique-item prompt.
+function ST.BuySelected()
+    local row = ST.selected
+    if not row or not ST.open or ST.scan.active or ST.analysis or (ST.verify and ST.verify.active) then return end
+    local tab = ST.tab
+    local candidates = tab == 1 and ST.vendor or ST.market
+    local eligible = false
+    for _, candidate in ipairs(candidates) do
+        if candidate == row then eligible = true; break end
+    end
+    if not eligible or not row.executable then return end
+    if row.source == 'commodity-quote' then
+        ST.OpenNative(row)
+        return
+    end
+    if row.source ~= 'item-search' or row.count ~= 1 or not row.auctionID then return end
+    local maximum = row.buyout
+    local started = GetTime()
+    local selection = ST.selectionNumber
+    ST.Verify(row, function(live)
+        if not ST.open or ST.selected ~= row or ST.tab ~= tab or ST.selectionNumber ~= selection
+           or not ST.BuyDetailsVisible() then return end
+        if GetTime() - started > 15 then
+            ST.message = 'Check took too long. Click Buy again for a fresh price.'
+        elseif live.buyout > maximum then
+            ST.message = 'Price increased. Review the new buyout before clicking Buy again.'
+        elseif GetMoney() < live.buyout then
+            ST.message = 'Insufficient gold for this buyout.'
+        elseif AuctionHouseFrame and type(AuctionHouseFrame.StartItemBuyout) == 'function' then
+            local ok = pcall(AuctionHouseFrame.StartItemBuyout, AuctionHouseFrame, live.auctionID, live.buyout)
+            ST.message = ok and 'Confirm the exact buyout in the WoW dialog.' or 'Could not open confirmation. Use Open native AH.'
+        else
+            ST.message = 'Buyout dialog unavailable. Use Open native AH.'
+        end
+        row.verification = ST.message
+    end)
 end
 function ST.SetFee(row,cut,deposit)
     cut,deposit=tonumber(cut),tonumber(deposit)

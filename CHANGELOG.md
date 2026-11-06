@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 — Buy from the deal details
+
+Buy item rechecks the identical auction, quantity, price, funds and trade filters before opening Blizzard’s buyout confirmation. A higher price requires a fresh click. Commodity purchases use the native quantity and quote flow.
+
 ## 0.4.2 — Item icons and NPC sell prices
 
 Show the item icon and sortable NPC sale price per unit in the results. Item details and tooltips also show the total NPC value for an executable quantity.

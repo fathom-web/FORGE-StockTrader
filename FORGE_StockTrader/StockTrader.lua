@@ -69,7 +69,11 @@ function ST.VisibleRows()
     end);return result
 end
 function ST.SetPanel(name)panel=name or 'results';ST.Refresh()end
+function ST.BuyDetailsVisible()
+    return panel=='detail' and ui and ui:IsVisible()
+end
 function ST.Select(row)
+    ST.selectionNumber=(ST.selectionNumber or 0)+1
     ST.selected=row;panel='detail'
     ui.detail.paid:SetText(tostring(row.buyout));ui.detail.cut:SetText(ST.db.settings.cutBP and tostring(ST.db.settings.cutBP/100) or '')
     local fee=ST.db.fees[row.key];ui.detail.deposit:SetText(type(fee)=='table' and fee.quantity==row.count and tostring(fee.deposit/10000) or '')
@@ -158,6 +162,8 @@ function ST.Refresh()
         p.metrics[1]:SetText(ST.money(d.buyout));p.metrics[2]:SetText(ST.money(d.profit));p.metrics[3]:SetText(d.downside and ST.money(-d.downside) or ST.money(d.value));p.metrics[4]:SetText(d.safe and ST.money(d.safe) or (d.roi and string.format('%.1f%% ROI',d.roi*100) or '--'))
         color(p.metrics[2],(d.profit or 0)>0 and 'green' or 'amber')
         p.reason:SetText(d.reason or 'Positive vendor margin for this exact full stack. Verify availability.')
+        p.buy:SetEnabled(not busy and d.executable and (d.profit or 0)>0)
+        p.buy:SetText(d.source=='commodity-quote' and 'Buy in native AH' or 'Buy item...')
         p.verify:SetEnabled(not busy);p.native:SetEnabled(not busy);p.record:SetEnabled(not busy)
         local deposit,source=ST.Costs.deposit(d,ST.db.settings.duration or 1)
         p.costSource:SetText(deposit~=nil and ('API deposit '..ST.money(deposit)..' | commission is your setting') or 'Deposit: manual until exact owned item is available. Commission: your setting.')
@@ -231,6 +237,7 @@ local function build()
     p.record=button(p,584,319,74,'Record',function()ST.RecordSelected(p.paid:GetText());ST.Refresh()end)
     p.costSource=label(p,18,347,640,'');p.costSource:SetMaxLines(1);color(p.costSource,'muted')
     p.verify=button(p,18,367,206,'Verify live listing',function()ST.Verify(ST.selected);ST.Refresh()end)
+    p.buy=button(p,452,367,206,'Buy item...',ST.BuySelected)
     p.native=button(p,232,367,206,'Open native AH',function()ST.OpenNative(ST.selected);ST.Refresh()end)
     -- Risk settings use player-facing units, with a single commission setting for the market.
     ui.settings.inputs={}

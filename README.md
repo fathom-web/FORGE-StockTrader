@@ -1,4 +1,4 @@
-# FORGE StockTrader — Quantum 0.4.2
+# FORGE StockTrader — Quantum 0.4.3
 
 **Buy Low. Sell High. Protect Your Gold.** A private-use WoW Forever addon by [Novyx Forge](https://novyxforge.com), interface 16001. Native Auction House integration, exactly **Vendor Sell** and **AH Koopjes**. No CurseForge publication or purchase automation.
 
@@ -26,6 +26,8 @@ Requests share the AH throttle, are at least two seconds apart, and never intent
 Forever may group many units at one displayed item-search price. Only single-unit item-search rows enter pricing, history and recommendations. A multi-unit commodity requires a quantity-matched native total quote. Ambiguous multi-unit item listings are skipped, including potentially genuine stacks.
 
 Positive integer-copper margin = vendor unit value × full quantity − complete buyout − known extra acquisition costs. Default minimum: 1 silver. Item detail shows buyout, profit, total vendor value, ROI, source and age. Sorting supports item, quantity, buyout, profit, ROI and score/status.
+
+**Buy item...** rechecks an individual deal and opens Blizzard’s buyout confirmation. You confirm the final purchase there. Commodity deals open the native quantity and quote flow.
 
 **Verify live listing** finds the same auction ID, exact item variant and complete quantity. It recalculates with the current buyout and settings. Disappeared listing: **STALE OPPORTUNITY**. Failed economics: **DO NOT BUY**. **Open native AH** takes you to Blizzard's item view; only the player performs purchases.
 
@@ -76,7 +78,7 @@ The journal shows realized net, open capital, recorded win rate and **actual pro
 python3 -m pip install lupa Pillow
 python3 tests/run.py
 python3 tests/render_ui.py /tmp/stocktrader-ui
-python3 tools/package.py /tmp/FORGE_StockTrader_0.4.2.zip
+python3 tools/package.py /tmp/FORGE_StockTrader_0.4.3.zip
 ```
 
 The tests explicitly run **Lua 5.1**. The renderer loads the actual Lua UI through frame mocks, uses synthetic fixtures, checks visible control bounds/overlap, and renders results/details/settings/journal. It is a layout check, **not an in-game screenshot**.
