@@ -74,7 +74,7 @@ test('external query cancels without results',function()local s,t=scanner();s:st
 test('cancel and reopen restart',function()local s,t,_,k=scanner();s:start();t(2);s:stop('CANCELLED','closed');complete(s,t,k);eq(s.state,'COMPLETE')end)
 test('large snapshot bounded per tick',function()local s,t,_,k=scanner({count=10000});s:start();t(2);s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');t();t(2);s:event('ITEM_SEARCH_RESULTS_UPDATED',k);t();eq(s.processed,100);assert(s.active)end)
 test('replicate requires event including empty',function()local s,t=scanner();s:start('replicate');t(2);eq(s.state,'RECEIVING');s:event('REPLICATE_ITEM_LIST_UPDATE');t();t();eq(s.state,'COMPLETE')end)
-test('browse paging only one request at a time',function()local s,t,c,_,o=scanner({more=true});s:start();t(2);s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');t(1);eq(#c,1);t(1);eq(c[2],'more');o.more=false;s:event('AUCTION_HOUSE_BROWSE_RESULTS_ADDED');t();eq(#s.keys,1)end)
+test('browse paging only one request at a time',function()local s,t,c,_,o=scanner({more=true});s:start();t(2);s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');s:event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');t(.5);eq(#c,1);t(.4);eq(c[2],'more');o.more=false;s:event('AUCTION_HOUSE_BROWSE_RESULTS_ADDED');t();eq(#s.keys,1)end)
 -- WoW-native frame mocks exercise actual UI and bundled LibAHTab, not just model code.
 local clock=0; local epoch=100000; local created={}; local chat={}
 function GetTime()return clock end; function time()return epoch end; date=os.date
@@ -181,7 +181,7 @@ test('priority scan checks vendor lead before exploration',function()
     setupAPI();ST.db.settings.scanLimit=10;ST.db.scanCursor=0
     local keys={};for i=1,20 do keys[i]={itemKey={itemID=i},minPrice=900,totalQuantity=1}end
     keys[19].minPrice=10
-    local selected=ST.Prioritize({scope='quick'},keys);eq(#selected,10);eq(selected[1].itemKey.itemID,19)
+    local selected=ST.Prioritize({scope='quick'},keys);eq(#selected,6);eq(selected[1].itemKey.itemID,19)
 end)
 test('full scope retains all market keys',function()
     local keys={};for i=1,70 do keys[i]={itemKey={itemID=i}}end
@@ -303,6 +303,21 @@ test('buy click opens native confirmation only after exact fresh affordable veri
     liveID=1;livePrice=500;ST.BuySelected();ST.SetPanel('results');finish();eq(calls,1)
     ST.Select(r);local original=GetMoney;GetMoney=function()return 1 end
     ST.BuySelected();finish();eq(calls,1);GetMoney=original
+end)
+test('quick scan avoids thousands of irrelevant detail requests and rotates exploration',function()
+    setupAPI()
+    local function market()
+        local keys={}
+        for i=1,4270 do keys[i]={itemKey={itemID=i},minPrice=900} end
+        keys[99].minPrice=10
+        return keys
+    end
+    ST.db.scanCursor=0;ST.db.settings.scanLimit=60;ST.db.browseReferences={}
+    local first=ST.Prioritize({scope='quick'},market())
+    local second=ST.Prioritize({scope='quick'},market())
+    eq(#first,6);eq(#second,6);eq(first[1].itemKey.itemID,99)
+    assert(first[2].itemKey.itemID~=second[2].itemKey.itemID)
+    eq(#ST.Prioritize({scope='full'},market()),4270)
 end)
 ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end

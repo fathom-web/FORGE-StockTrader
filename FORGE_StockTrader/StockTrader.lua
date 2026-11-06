@@ -124,6 +124,11 @@ function ST.Refresh()
     ui.status:SetText(op and op.message or ST.message)
     local checked=s and s.checkedKeys or 0;local selected=s and #(s.keys or {}) or 0;local total=s and s.marketKeys or 0
     ui.coverage:SetText(string.format('MARKET %s   |   CHECKED %d/%d selected   |   %d market keys',s and s.browseComplete and 'LOADED' or 'WAITING',checked,selected,total))
+    if s and s.active and s.detailStarted and checked>=5 and selected>checked then
+        local remaining=(GetTime()-s.detailStarted)*(selected-checked)/checked
+        ui.coverage:SetText(string.format('%s SCAN   |   %d/%d checked   |   %d market keys   |   ~%d min left',
+            s.scope=='full' and 'FULL' or 'QUICK',checked,selected,total,math.ceil(remaining/60)))
+    end
     local last=ST.db.lastScan and date('%H:%M',ST.db.lastScan) or 'never'
     ui.count:SetText(string.format('%d vendor   /   %d AH   /   %d research   |   last success %s',#ST.vendor,#ST.market,#ST.rejected+#ST.commodities,last))
     local frac=selected>0 and math.min(1,checked/selected) or 0;ui.progress:SetWidth(math.max(1,(ui.width-36)*frac))

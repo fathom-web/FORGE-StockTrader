@@ -1,7 +1,7 @@
 local _,ST=...; local M=ST.Model; local S={}; ST.Scanner=S; S.__index=S
 local unpack=unpack or table.unpack
 function S.new(api,clock,resolve,notify)
-    return setmetatable({api=api,clock=clock,resolve=resolve,notify=notify,state='IDLE',active=false,lastExternal=-100,lastRequest=-100},S)
+    return setmetatable({api=api,clock=clock,resolve=resolve,notify=notify,state='IDLE',active=false,lastExternal=-100,lastRequest=-100,requestGap=0.8},S)
 end
 function S:set(state,message)
     if self.state==state and self.message==(message or state) then return end
@@ -29,7 +29,7 @@ function S:start(mode)
     if self.active then return false end
     self.mode=mode or 'browse'; self.active=true; self.started=self.clock(); self.processed=0; self.excluded=0; self.incomplete=0
     self.rows={}; self.groups={}; self.keys={}; self.keyIndex=0; self.seen={}; self.work=nil; self.waiting=nil; self.request=nil
-    self.lastProgress=self.clock(); self.browseComplete=false; self.checkedKeys=0; self.pauseRequested=false; self.paused=false; self.keySeen={}
+    self.keyStarted=nil; self.marketKeys=nil; self.detailStarted=nil; self.lastProgress=self.clock(); self.browseComplete=false; self.checkedKeys=0; self.pauseRequested=false; self.paused=false; self.keySeen={}
     if self.mode=='replicate' then self:queue('ReplicateItems',{},'replicate')
     else self:queue('SendBrowseQuery',{{searchString='',sorts={},filters={},itemClassFilters={}}},'browse') end
     return true
@@ -94,8 +94,15 @@ function S:tick()
         if now-self.started>7200 then self:stop('TIMEOUT','Scan exceeded two hours; unfinished scope not committed'); return end
         if self.request then
             if now-self.queued>45 then self:stop('TIMEOUT','AH request could not be sent within 45 seconds'); return end
-            if now-math.max(self.lastRequest,self.lastExternal)<2 then return end
-            if not self:call('IsThrottledMessageSystemReady') then self:set('THROTTLED','Waiting for shared AH throttle'); return end
+            -- Give external searches their original grace period. Inside our own
+            -- scan, pace the next request against actual client readiness.
+            if now-self.lastExternal<2 or now-self.lastRequest<self.requestGap then return end
+            if not self:call('IsThrottledMessageSystemReady') then
+                self.requestGap=2
+                self:set('THROTTLED','Waiting for shared AH throttle')
+                return
+            end
+            self.requestGap=math.max(0.8,self.requestGap-0.1)
             local q=self.request; self.request=nil; self.waiting=q.kind; self.sent=now; self.lastRequest=now
             self:set('RECEIVING','Waiting: '..q.name)
             self.ownRequest=true
@@ -112,14 +119,16 @@ function S:tick()
         if w.kind=='browse' then
             for i=1,100 do
                 local r=w.data[w.index]; if not r then
-                    self.work=nil; self.browseComplete=true; self.marketKeys=#self.keys
+                    self.work=nil; self.browseComplete=true; self.marketKeys=#self.keys; self.detailStarted=now
                     if self.onBrowse then self.keys=self.onBrowse(self,self.keys) or self.keys end
                     self:nextKey(); return
                 end
                 if not M.browseKey(r.itemKey) then error('Invalid browse identity') end
                 if (r.itemKey.battlePetSpeciesID or 0)>0 then self.excluded=self.excluded+1
                 elseif not self.keySeen[M.browseKey(r.itemKey)] then
-                    self.keySeen[M.browseKey(r.itemKey)]=true; self.keys[#self.keys+1]=r end
+                    self.keySeen[M.browseKey(r.itemKey)]=true
+                    if self.rankKey then self.rankKey(r) end
+                    self.keys[#self.keys+1]=r end
                 if #self.keys>10000 then error('Safety limit: >10000 item keys') end
                 w.index=w.index+1
             end
@@ -161,6 +170,8 @@ function S:pause()
 end
 function S:resume()
     if not self.paused then return false end
-    self.started=self.started+(self.clock()-self.pausedAt); self.paused=false; self.active=true
+    local pauseTime=self.clock()-self.pausedAt
+    if self.detailStarted then self.detailStarted=self.detailStarted+pauseTime end
+    self.started=self.started+pauseTime; self.paused=false; self.active=true
     self:nextKey(); return true
 end

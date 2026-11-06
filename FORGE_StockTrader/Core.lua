@@ -1,5 +1,5 @@
 local ADDON,ST=...; local M,D=ST.Model,ST.Database
-ST.version='0.4.3'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
+ST.version='0.4.4'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
 ST.message='Quick scan checks priority items first. Full scan builds wider price history.'
 ST.commodities={}; ST.pendingGroups={}
 function ST.money(n)
@@ -73,20 +73,45 @@ local function merge(row,calc)
     local d={}; for k,v in pairs(row) do d[k]=v end; for k,v in pairs(calc) do d[k]=v end; return d
 end
 -- Priority is discovery only. Browse minima are NEVER execution evidence.
+local function rankKey(row)
+    local price=tonumber(row.minPrice)
+    row.priority=0
+    if not price or price<=0 then return end
+    local vendor
+    if C_Item and C_Item.GetItemInfo then
+        vendor=select(11,C_Item.GetItemInfo(row.itemKey.itemID))
+    end
+    if type(vendor)=='number' and vendor>price then
+        row.priority=100000+math.min(99999,vendor-price)
+        return
+    end
+    local references=ST.db.browseReferences
+    local previous=references and references[M.browseKey(row.itemKey)]
+    if previous and previous.at and time()-previous.at<86400 and price<previous.price*.7 then
+        row.priority=50000+previous.price/price
+    end
+end
+
 function ST.Prioritize(scan,keys)
     local cursor=ST.db.scanCursor or 0
-    for i,r in ipairs(keys) do
-        local info=itemInfo(nil,r.itemKey.itemID); local price=tonumber(r.minPrice)
-        local score=0
-        if info and price and price>0 and info.vendor>price then score=100000+math.min(99999,info.vendor-price) end
-        local known=ST.db.browseReferences and ST.db.browseReferences[M.browseKey(r.itemKey)]
-        if known and known.at and time()-known.at<86400 and price and price>0 and price<known.price*.7 then score=math.max(score,50000+known.price/price) end
-        r.priority=score; r.order=(i-cursor-1)%math.max(1,#keys)
+    for i,row in ipairs(keys) do
+        if row.priority==nil then rankKey(row) end
+        row.order=(i-cursor-1)%math.max(1,#keys)
     end
     table.sort(keys,function(a,b)if a.priority==b.priority then return a.order<b.order end; return a.priority>b.priority end)
     if scan.scope=='full' then return keys end
-    local selected={}; for i=1,math.min(#keys,ST.db.settings.scanLimit or 60) do selected[i]=keys[i] end
-    ST.db.scanCursor=(cursor+#selected)%math.max(1,#keys)
+    local selected={}
+    local explored=0
+    for i=1,math.min(#keys,ST.db.settings.scanLimit or 60) do
+        local row=keys[i]
+        if row.priority==0 then
+            if explored==5 then break end
+            explored=explored+1
+            -- Advance past the explored item's original position in the market.
+            ST.db.scanCursor=(cursor+row.order+1)%#keys
+        end
+        selected[#selected+1]=row
+    end
     return selected
 end
 local function append(target,row,calc)
@@ -147,7 +172,7 @@ function ST.Start(mode)
     if not ST.open or ST.scan.active or ST.analysis or (ST.verify and ST.verify.active) then ST.message='Open AH; finish or cancel the current operation first.'; changed(); return end
     if mode=='replicate' and time()<(ST.db.nextReplicate or 0) then ST.message='Replicate cooldown until '..date('%H:%M:%S',ST.db.nextReplicate); changed(); return end
     ST.vendor={}; ST.market={}; ST.rejected={}; ST.commodities={}; ST.selected=nil; ST.pendingGroups={}; ST.validatedKeys={}
-    ST.scan.wallStarted=time(); ST.scan.onBrowse=ST.Prioritize; ST.scan.onKey=ST.KeyComplete; ST.scan.scope=mode=='full' and 'full' or 'quick'
+    ST.scan.wallStarted=time(); ST.scan.rankKey=rankKey; ST.scan.onBrowse=ST.Prioritize; ST.scan.onKey=ST.KeyComplete; ST.scan.scope=mode=='full' and 'full' or 'quick'
     if mode=='replicate' then ST.db.nextReplicate=time()+900 end
     ST.message='Partial results appear after each complete item check. Pause to inspect or verify.'
     ST.scan:start(mode); changed()

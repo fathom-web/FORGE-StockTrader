@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 — Shorter scans
+
+Pace serial queries from client readiness with a 0.8-second minimum and backoff. Rank keys during batched indexing. Quick scan includes up to five exploratory keys alongside leads. Full scan retains all keys and shows an estimated remaining duration after five checks.
+
 ## 0.4.3 — Buy from the deal details
 
 Buy item rechecks the identical auction, quantity, price, funds and trade filters before opening Blizzard’s buyout confirmation. A higher price requires a fresh click. Commodity purchases use the native quantity and quote flow.

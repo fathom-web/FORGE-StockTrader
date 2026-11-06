@@ -1,4 +1,4 @@
-# FORGE StockTrader — Quantum 0.4.3
+# FORGE StockTrader — Quantum 0.4.4
 
 **Buy Low. Sell High. Protect Your Gold.** A private-use WoW Forever addon by [Novyx Forge](https://novyxforge.com), interface 16001. Native Auction House integration, exactly **Vendor Sell** and **AH Koopjes**. No CurseForge publication or purchase automation.
 
@@ -13,13 +13,13 @@
 
 ## Scan modes and honest coverage
 
-- **Quick scan:** load the complete browse index; prioritize apparent vendor spreads and recent historical discounts; check up to **60 item keys** by default. Other keys rotate as exploration. Browse minima prioritize searches only, never establish buyable deals. Change the 10–300-key limit in Settings.
+- **Quick scan:** load the complete browse index; prioritize apparent vendor spreads and recent historical discounts; check up to **60 item keys** by default. Up to five other keys rotate per scan to build history. Browse minima prioritize searches only, never establish buyable deals. Change the 10–300-key limit in Settings.
 - **Full scan:** check every supported browse key, in priority order. It takes longer and can time out in very large markets.
 - Complete item searches appear **immediately** in results. The banner distinguishes **market index loaded**, **selected keys checked**, **partial**, **paused**, **failed**, and **quick/full scope complete**. A completed 60-key quick scan never claims all 1240 market keys were checked.
 - **Pause** finishes the current item key safely; then inspect or verify a deal. **Resume** continues the remaining selection. Native searches or other addons cancel an active scan; paused work can be resumed later.
 - **Stop**, closing AH, throttling and missing item data cannot turn an unfinished scan green. Previously completed individual item checks remain valid observations; the interrupted item's partial rows do not enter history or results. Last-success time advances only after the selected scope finishes.
 
-Requests share the AH throttle, are at least two seconds apart, and never intentionally overlap. The UI refresh is limited to once per second except meaningful state/data changes. Each result keeps its own age; listings older than 120 seconds are marked stale. **Reverify immediately before any manual purchase.**
+Requests share the AH throttle, are at least 0.8 seconds apart and slow down on throttle feedback, and never intentionally overlap. The UI refresh is limited to once per second except meaningful state/data changes. Each result keeps its own age; listings older than 120 seconds are marked stale. **Reverify immediately before any manual purchase.**
 
 ## Vendor Sell
 
@@ -78,7 +78,7 @@ The journal shows realized net, open capital, recorded win rate and **actual pro
 python3 -m pip install lupa Pillow
 python3 tests/run.py
 python3 tests/render_ui.py /tmp/stocktrader-ui
-python3 tools/package.py /tmp/FORGE_StockTrader_0.4.3.zip
+python3 tools/package.py /tmp/FORGE_StockTrader_0.4.4.zip
 ```
 
 The tests explicitly run **Lua 5.1**. The renderer loads the actual Lua UI through frame mocks, uses synthetic fixtures, checks visible control bounds/overlap, and renders results/details/settings/journal. It is a layout check, **not an in-game screenshot**.
