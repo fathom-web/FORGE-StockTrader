@@ -1,5 +1,5 @@
 local ADDON,ST=...; local M,D=ST.Model,ST.Database
-ST.version='0.4.4'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
+ST.version='0.4.5'; ST.vendor={}; ST.market={}; ST.rejected={}; ST.tab=1; ST.sort='profit'; ST.open=false
 ST.message='Quick scan checks priority items first. Full scan builds wider price history.'
 ST.commodities={}; ST.pendingGroups={}
 function ST.money(n)
@@ -156,7 +156,7 @@ local function analyzeTick()
     local a=ST.analysis; ST.analysis=nil; D.prune(ST.db,time()); ST.db.lastScan=time()
     ST.db.lastScope=a.scan.scope or 'full'; ST.db.lastChecked=a.scan.checkedKeys or 0
     a.scan:set('COMPLETE',string.format('%s COMPLETE | %d/%d market keys checked | %d vendor | %d speculative',
-        a.scan.scope=='quick' and 'QUICK SCAN' or 'SCAN',a.scan.checkedKeys or 0,a.scan.marketKeys or 0,#ST.vendor,#ST.market))
+        a.scan.mode=='shared' and 'SHARED SCAN CHECKS' or (a.scan.scope=='quick' and 'QUICK SCAN' or 'SCAN'),a.scan.checkedKeys or 0,a.scan.marketKeys or 0,#ST.vendor,#ST.market))
     ST.message=a.scan.message
     if ST.db.settings.alerts then print('|cff66ee88FORGE StockTrader:|r '..ST.message) end
     changed()
@@ -168,14 +168,56 @@ function ST.Reassess()
     end
     changed()
 end
-function ST.Start(mode)
+-- Observe the shared AH result stream. Auctionator controls its own pagination.
+local observingBrowse = false
+local sharedIndex
+
+local function unfiltered(query)
+    return type(query)=='table' and query.searchString==''
+        and not query.minLevel and not query.maxLevel
+        and (not query.filters or not next(query.filters))
+        and (not query.itemClassFilters or not next(query.itemClassFilters))
+end
+
+local function captureBrowse()
+    if not observingBrowse or not ST.open then return end
+    local api = C_AuctionHouse
+    if not api.HasFullBrowseResults() then return end
+    observingBrowse = false
+    local rows = api.GetBrowseResults()
+    if type(rows) ~= 'table' or #rows > 10000 then return end
+    local data = {}
+    for i, row in ipairs(rows) do
+        local k = row.itemKey
+        if not M.browseKey(k) or not M.integer(row.minPrice) then return end
+        data[i] = {itemKey={itemID=k.itemID,itemLevel=k.itemLevel,itemSuffix=k.itemSuffix,
+            battlePetSpeciesID=k.battlePetSpeciesID},minPrice=row.minPrice}
+    end
+    sharedIndex = {rows=data, captured=GetTime(), market=D.market()}
+    ST.message = 'Shared market index ready. Open StockTrader to check candidates.'
+    changed()
+end
+
+function ST.UseSharedIndex()
+    local index = sharedIndex
+    if not index or index.used or not ST.open or index.market~=D.market()
+       or GetTime()-index.captured>900 then return end
+    if ST.scan.active or ST.scan.paused or ST.analysis or (ST.verify and ST.verify.active) then return end
+    index.used = true
+    ST.Start('shared',index.rows)
+end
+
+function ST.Start(mode, sharedRows)
     if not ST.open or ST.scan.active or ST.analysis or (ST.verify and ST.verify.active) then ST.message='Open AH; finish or cancel the current operation first.'; changed(); return end
     if mode=='replicate' and time()<(ST.db.nextReplicate or 0) then ST.message='Replicate cooldown until '..date('%H:%M:%S',ST.db.nextReplicate); changed(); return end
     ST.vendor={}; ST.market={}; ST.rejected={}; ST.commodities={}; ST.selected=nil; ST.pendingGroups={}; ST.validatedKeys={}
     ST.scan.wallStarted=time(); ST.scan.rankKey=rankKey; ST.scan.onBrowse=ST.Prioritize; ST.scan.onKey=ST.KeyComplete; ST.scan.scope=mode=='full' and 'full' or 'quick'
     if mode=='replicate' then ST.db.nextReplicate=time()+900 end
     ST.message='Partial results appear after each complete item check. Pause to inspect or verify.'
-    ST.scan:start(mode); changed()
+    observingBrowse=false
+    ST.scan:start(mode, sharedRows)
+    if mode=='shared' then ST.message='Shared market index loaded. Checking individual candidates.' end
+    changed()
 end
 function ST.Cancel()
     ST.analysis=nil; ST.pendingGroups={}
@@ -301,11 +343,15 @@ f:SetScript('OnEvent',function(_,event,arg,arg2)
     elseif event=='AUCTION_HOUSE_SHOW' then
         ST.open=true; ST.Costs.reset(); if not ST.db then database() end
         ST.scan.api=C_AuctionHouse or {}; ST.Attach(); changed()
-    elseif event=='AUCTION_HOUSE_CLOSED' then ST.open=false; ST.Cancel(); if ST.Quotes then ST.Quotes.invalidate('AH closed') end
+    elseif event=='AUCTION_HOUSE_CLOSED' then ST.open=false; observingBrowse=false; ST.Cancel(); if ST.Quotes then ST.Quotes.invalidate('AH closed') end
     elseif event=='BAG_UPDATE_DELAYED' then ST.Costs.reset()
     elseif event=='COMMODITY_PRICE_UPDATED' or event=='COMMODITY_PRICE_UNAVAILABLE' or event=='COMMODITY_PURCHASE_FAILED' or event=='COMMODITY_PURCHASE_SUCCEEDED' then
         ST.Quotes.event(event,arg,arg2)
     else
+        if event=='AUCTION_HOUSE_BROWSE_RESULTS_UPDATED' or event=='AUCTION_HOUSE_BROWSE_RESULTS_ADDED' then
+            local ok=pcall(captureBrowse)
+            if not ok then observingBrowse=false end
+        end
         if ST.scan then ST.scan:event(event,arg) end
         if ST.verify then ST.verify:event(event,arg) end
     end
@@ -328,11 +374,17 @@ function ST.InstallHooks()
     ST.hooked=true; if ST.Quotes then ST.Quotes.install() end
     for _,name in ipairs({'SendBrowseQuery','RequestMoreBrowseResults','SendSearchQuery','SendSellSearchQuery','RequestMoreItemSearchResults','RequestMoreCommoditySearchResults','ReplicateItems','SearchForItemKeys','SearchForFavorites','RefreshItemSearchResults','RefreshCommoditySearchResults'}) do
         if type(C_AuctionHouse[name])=='function' then
-            hooksecurefunc(C_AuctionHouse,name,function()
+            local method=name
+            hooksecurefunc(C_AuctionHouse,name,function(query)
                 if (ST.scan and ST.scan.ownRequest) or (ST.verify and ST.verify.ownRequest) then
                     if ST.scan then ST.scan.lastRequest=GetTime() end
                     if ST.verify then ST.verify.lastRequest=GetTime() end
                     return
+                end
+                if method=='SendBrowseQuery' then
+                    observingBrowse=ST.open and unfiltered(query)
+                elseif method~='RequestMoreBrowseResults' then
+                    observingBrowse=false
                 end
                 if ST.scan then ST.scan:external() end
                 if ST.verify then ST.verify:external() end

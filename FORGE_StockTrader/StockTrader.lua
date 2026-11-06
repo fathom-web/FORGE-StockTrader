@@ -115,7 +115,7 @@ function ST.Refresh()
     local s=ST.scan;local op=ST.verify and ST.verify.active and ST.verify or s
     local busy=(s and s.active) or ST.analysis or (ST.verify and ST.verify.active)
     local state=op and op.state or 'IDLE';local tint='muted';local title=state
-    if state=='COMPLETE' then tint='green';title=(s.scope=='quick' and 'QUICK SCAN COMPLETE' or 'SCAN COMPLETE')
+    if state=='COMPLETE' then tint='green';title=s.mode=='shared' and 'SHARED SCAN CHECKS COMPLETE' or (s.scope=='quick' and 'QUICK SCAN COMPLETE' or 'SCAN COMPLETE')
     elseif state=='ERROR' or state=='TIMEOUT' then tint='red';title='SCAN FAILED'
     elseif state=='PAUSED' then tint='amber';title='PAUSED - PARTIAL RESULTS'
     elseif state=='CANCELLED' then title='STOPPED - PARTIAL RESULTS'
@@ -271,6 +271,7 @@ local function build()
     button(ui.diagnostics,18,367,170,'Select diagnostic text',function()ui.diagnostics.text:SetFocus();ui.diagnostics.text:HighlightText()end)
     button(ui.diagnostics,200,367,170,'Experimental replicate',function()panel='results';ST.Start('replicate')end)
     button(ui.diagnostics,382,367,276,'Back',function()panel='results';ST.Refresh()end)
+    ui:SetScript('OnShow',function() ST.UseSharedIndex() end)
     ui:Hide();ST.Refresh()
 end
 function ST.Attach()

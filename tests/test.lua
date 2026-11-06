@@ -319,6 +319,28 @@ test('quick scan avoids thousands of irrelevant detail requests and rotates expl
     assert(first[2].itemKey.itemID~=second[2].itemKey.itemID)
     eq(#ST.Prioritize({scope='full'},market()),4270)
 end)
+test('Auctionator-style paged scan reused on tab open without another browse',function()
+    setupAPI();ST.Cancel();ST.open=true
+    local queries,pages,details=0,0,0
+    local full=false
+    C_AuctionHouse.SendBrowseQuery=function() queries=queries+1 end
+    C_AuctionHouse.RequestMoreBrowseResults=function() pages=pages+1 end
+    C_AuctionHouse.SendSearchQuery=function() details=details+1 end
+    C_AuctionHouse.HasFullBrowseResults=function() return full end
+    C_AuctionHouse.GetBrowseResults=function() return {{itemKey=key,minPrice=100}} end
+    ST.hooked=false;ST.InstallHooks()
+    C_AuctionHouse.SendBrowseQuery({searchString='',filters={},itemClassFilters={}})
+    event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED')
+    ST.ui.scripts.OnShow();assert(not ST.scan.active)
+    C_AuctionHouse.RequestMoreBrowseResults();full=true
+    event('AUCTION_HOUSE_BROWSE_RESULTS_ADDED');ST.ui.scripts.OnShow()
+    eq(ST.scan.mode,'shared');update();update(2);eq(details,1)
+    event('ITEM_SEARCH_RESULTS_UPDATED',key);for i=1,8 do update() end
+    eq(ST.scan.state,'COMPLETE');eq(queries,1);eq(pages,1)
+    ST.ui.scripts.OnShow();assert(not ST.scan.active)
+    C_AuctionHouse.SendBrowseQuery({searchString='dagger'})
+    event('AUCTION_HOUSE_BROWSE_RESULTS_UPDATED');ST.ui.scripts.OnShow();assert(not ST.scan.active)
+end)
 ForgeTest={ST=ST,created=created,frame=frame,setClock=function(t,e)clock=t;epoch=e end}
 for _,t in ipairs(tests)do local ok,err=pcall(t[2]);if ok then passed=passed+1;io.write('PASS ',t[1],'\n')else io.write('FAIL ',t[1],': ',tostring(err),'\n')end end
 print(string.format('%d/%d tests passed (%s)',passed,#tests,_VERSION));assert(passed==#tests,'Test failures')

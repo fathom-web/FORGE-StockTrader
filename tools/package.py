@@ -6,7 +6,7 @@ addon=root/'FORGE_StockTrader'
 for line in (addon/'FORGE_StockTrader.toc').read_text().splitlines():
     if line.endswith('.lua'):
         assert (addon/line).is_file(), f'Missing TOC dependency: {line}'
-out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/FORGE_StockTrader_0.4.4.zip')
+out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/FORGE_StockTrader_0.4.5.zip')
 out.parent.mkdir(parents=True,exist_ok=True)
 with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
     for p in sorted(addon.rglob('*')):

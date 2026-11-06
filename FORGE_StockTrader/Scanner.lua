@@ -25,12 +25,16 @@ function S:queue(name,args,kind)
     self.request={name=name,args=args or {},kind=kind}; self.queued=self.clock(); self.waiting=nil
     self:set('REQUESTING',name)
 end
-function S:start(mode)
+function S:start(mode, sharedRows)
     if self.active then return false end
     self.mode=mode or 'browse'; self.active=true; self.started=self.clock(); self.processed=0; self.excluded=0; self.incomplete=0
     self.rows={}; self.groups={}; self.keys={}; self.keyIndex=0; self.seen={}; self.work=nil; self.waiting=nil; self.request=nil
     self.keyStarted=nil; self.marketKeys=nil; self.detailStarted=nil; self.lastProgress=self.clock(); self.browseComplete=false; self.checkedKeys=0; self.pauseRequested=false; self.paused=false; self.keySeen={}
-    if self.mode=='replicate' then self:queue('ReplicateItems',{},'replicate')
+    if self.mode=='shared' then
+        assert(type(sharedRows)=='table','Missing shared market index')
+        self.work={kind='browse',data=sharedRows,index=1}
+        self:set('PROCESSING','Selecting candidates from the shared market scan')
+    elseif self.mode=='replicate' then self:queue('ReplicateItems',{},'replicate')
     else self:queue('SendBrowseQuery',{{searchString='',sorts={},filters={},itemClassFilters={}}},'browse') end
     return true
 end

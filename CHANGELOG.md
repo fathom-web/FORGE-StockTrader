@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5 — Reuse the Auctionator browse scan
+
+Opening the StockTrader tab consumes a recently observed complete unfiltered market browse once and starts targeted checks using its item keys. No file upload is required.
+
 ## 0.4.4 — Shorter scans
 
 Pace serial queries from client readiness with a 0.8-second minimum and backoff. Rank keys during batched indexing. Quick scan includes up to five exploratory keys alongside leads. Full scan retains all keys and shows an estimated remaining duration after five checks.

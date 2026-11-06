@@ -1,4 +1,4 @@
-# FORGE StockTrader — Quantum 0.4.4
+# FORGE StockTrader — Quantum 0.4.5
 
 **Buy Low. Sell High. Protect Your Gold.** A private-use WoW Forever addon by [Novyx Forge](https://novyxforge.com), interface 16001. Native Auction House integration, exactly **Vendor Sell** and **AH Koopjes**. No CurseForge publication or purchase automation.
 
@@ -7,7 +7,7 @@
 1. Close WoW and back up `WTF/Account/<account>/SavedVariables/FORGEStockTraderDB.lua`.
 2. Extract the install ZIP, or copy the repository's `FORGE_StockTrader` folder, into `World of Warcraft/_forever_/Interface/AddOns/`, replacing the previous addon folder. Include **all modules and Lib files**.
 3. Restart WoW. Open AH → **StockTrader**, or use `/fst`.
-4. Start **Quick scan**. Try **Full scan** later when you want broader history.
+4. With StockTrader enabled, run Auctionator’s standard full browse scan. After it finishes, open StockTrader within 15 minutes in the same game session. Forge reuses the completed unfiltered market index and automatically checks selected listings. No second market browse is sent. Quick scan and Full scan remain available for standalone use. Old saved files and replicate-mode scans are outside this integration.
 
 **Live Forever verification is still required.** Automated tests and rendered frame mocks cannot establish real server behaviour or actual WoW font/template rendering. The development steps are implemented; the player-run acceptance steps in [Validation](docs/VALIDATION.md) remain open.
 
@@ -78,7 +78,7 @@ The journal shows realized net, open capital, recorded win rate and **actual pro
 python3 -m pip install lupa Pillow
 python3 tests/run.py
 python3 tests/render_ui.py /tmp/stocktrader-ui
-python3 tools/package.py /tmp/FORGE_StockTrader_0.4.4.zip
+python3 tools/package.py /tmp/FORGE_StockTrader_0.4.5.zip
 ```
 
 The tests explicitly run **Lua 5.1**. The renderer loads the actual Lua UI through frame mocks, uses synthetic fixtures, checks visible control bounds/overlap, and renders results/details/settings/journal. It is a layout check, **not an in-game screenshot**.
